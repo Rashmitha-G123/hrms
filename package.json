@@ -4,6 +4,7 @@
   "main": "index.ts",
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
+    "@expo-google-fonts/poppins": "^0.4.1",
     "@expo/metro-runtime": "~56.0.13",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -30,8 +31,8 @@
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
-    "cross-env": "^7.0.3",
     "@types/react": "~19.2.2",
+    "cross-env": "^7.0.3",
     "typescript": "~6.0.3"
   },
   "scripts": {

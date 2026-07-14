@@ -15,12 +15,12 @@ interface AvatarProps {
 
 const GRADIENT_COLORS = [
   ['#2563EB', '#60A5FA'],
-  ['#1E40AF', '#3B82F6'],
+  ['#ffffff', '#3B82F6'],
   ['#10B981', '#34D399'],
   ['#F59E0B', '#FCD34D'],
   ['#EF4444', '#FCA5A5'],
   ['#8B5CF6', '#C4B5FD'],
-  ['#06B6D4', '#67E8F9'],
+  ['#ffffff', '#67E8F9'],
   ['#3B82F6', '#93C5FD'],
 ];
 
@@ -40,7 +40,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   initials,
   size = 44,
   backgroundColor,
-  textColor = Colors.white,
+  textColor = Colors.primary,
   online,
   style,
 }) => {

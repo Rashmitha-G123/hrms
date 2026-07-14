@@ -9,7 +9,7 @@ interface TabIconProps {
   name: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
   focused: boolean;
-  color: string;
+  color: any;
 }
 
 const TabIcon: React.FC<TabIconProps> = ({ name, label, focused, color }) => (

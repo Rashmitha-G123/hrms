@@ -10,18 +10,18 @@ import { mockExpenses } from '../../data/mockData';
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 const EXPENSE_CATEGORIES: { label: string; iconName: IoniconName; color: string }[] = [
-  { label: 'Meals',    iconName: 'restaurant-outline',               color: Colors.warning },
-  { label: 'Travel',  iconName: 'airplane-outline',                  color: Colors.accent },
-  { label: 'Software',iconName: 'laptop-outline',                    color: Colors.primary },
-  { label: 'Office',  iconName: 'briefcase-outline',                 color: Colors.success },
-  { label: 'Medical', iconName: 'medkit-outline',                    color: Colors.danger },
-  { label: 'Other',   iconName: 'ellipsis-horizontal-circle-outline',color: Colors.gray600 },
+  { label: 'Meals', iconName: 'restaurant-outline', color: Colors.warning },
+  { label: 'Travel', iconName: 'airplane-outline', color: Colors.accent },
+  { label: 'Software', iconName: 'laptop-outline', color: Colors.primary },
+  { label: 'Office', iconName: 'briefcase-outline', color: Colors.success },
+  { label: 'Medical', iconName: 'medkit-outline', color: Colors.danger },
+  { label: 'Other', iconName: 'ellipsis-horizontal-circle-outline', color: Colors.gray600 },
 ];
 
 export default function ExpensesScreen() {
   const router = useRouter();
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const totalPending  = mockExpenses.filter(e => e.status === 'pending').reduce((a, e) => a + e.amount, 0);
+  const totalPending = mockExpenses.filter(e => e.status === 'pending').reduce((a, e) => a + e.amount, 0);
   const totalApproved = mockExpenses.filter(e => e.status === 'approved').reduce((a, e) => a + e.amount, 0);
 
   const filteredExpenses = selectedCategory

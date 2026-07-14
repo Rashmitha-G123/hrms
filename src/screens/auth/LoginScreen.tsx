@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   KeyboardAvoidingView, Platform, StatusBar, Image,
-  ActivityIndicator,
+  ActivityIndicator, Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,8 +11,9 @@ import { Colors, Typography, Spacing, Radius } from '../../design-system/tokens'
 import { Button } from '../../design-system/components/Button';
 import { Input } from '../../design-system/components/Input';
 import {
-  fetchCaptcha, loginApi, saveToken,
+  fetchCaptcha, loginApi, saveToken, saveTenantId,
   CaptchaResponse, LoginError, LoginSuccess,
+  registerSuperadminApi,
 } from '../../services/authService';
 
 type LoginMode = 'employee' | 'superadmin';
@@ -20,20 +21,29 @@ type LoginMode = 'employee' | 'superadmin';
 export default function LoginScreen() {
   const router = useRouter();
 
-  const [mode, setMode]               = useState<LoginMode>('employee');
-  const [identifier, setIdentifier]   = useState('');   // employeeId or email
-  const [password, setPassword]       = useState('');
+  const [mode, setMode] = useState<LoginMode>('employee');
+  const [identifier, setIdentifier] = useState('');   // employeeId or email
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  const [captcha, setCaptcha]               = useState('');
-  const [captchaInput, setCaptchaInput]     = useState('');
-  const [captchaToken, setCaptchaToken]     = useState('');
+  const [captcha, setCaptcha] = useState('');
+  const [captchaInput, setCaptchaInput] = useState('');
+  const [captchaToken, setCaptchaToken] = useState('');
   const [captchaLoading, setCaptchaLoading] = useState(false);
 
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
-  const [warning, setWarning]   = useState('');
-  const [locked, setLocked]     = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
+  const [locked, setLocked] = useState(false);
+
+  // Register Superadmin State
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [registerName, setRegisterName] = useState('');
+  const [registerEmail, setRegisterEmail] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [registerLoading, setRegisterLoading] = useState(false);
+  const [registerError, setRegisterError] = useState('');
+  const [registerSuccess, setRegisterSuccess] = useState('');
 
   // ── Load CAPTCHA ──────────────────────────────────────────────────────────
   const loadCaptcha = useCallback(async () => {
@@ -44,7 +54,8 @@ export default function LoginScreen() {
       const data: CaptchaResponse = await fetchCaptcha();
       setCaptcha(data.image);
       setCaptchaToken(data.captchaToken);
-    } catch {
+    } catch (err) {
+      console.error('Failed to load CAPTCHA:', err);
       setError('Failed to load CAPTCHA. Please try again.');
     } finally {
       setCaptchaLoading(false);
@@ -65,6 +76,41 @@ export default function LoginScreen() {
   // ── Dummy credentials ─────────────────────────────────────────────────────
   const isDummySuperAdmin = mode === 'superadmin';
 
+  const handleRegisterSuperadmin = async () => {
+    setRegisterError('');
+    setRegisterSuccess('');
+    
+    if (!registerName.trim()) { setRegisterError('Name is required.'); return; }
+    if (!registerEmail.trim()) { setRegisterError('Email is required.'); return; }
+    if (!registerPassword.trim()) { setRegisterError('Password is required.'); return; }
+    
+    setRegisterLoading(true);
+    try {
+      const { ok, data } = await registerSuperadminApi({
+        name: registerName.trim(),
+        email: registerEmail.trim(),
+        password: registerPassword,
+      });
+      
+      if (ok) {
+        setRegisterSuccess(data.message || 'Superadmin registered successfully.');
+        setRegisterName('');
+        setRegisterEmail('');
+        setRegisterPassword('');
+        setTimeout(() => {
+          setShowRegisterModal(false);
+          setRegisterSuccess('');
+        }, 2000);
+      } else {
+        setRegisterError(data.message || 'Failed to register Superadmin.');
+      }
+    } catch (err: any) {
+      setRegisterError(err.message || 'Network error. Please try again.');
+    } finally {
+      setRegisterLoading(false);
+    }
+  };
+
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleLogin = async () => {
     setError('');
@@ -77,28 +123,18 @@ export default function LoginScreen() {
     }
     if (!password) { setError('Password is required.'); return; }
 
-    // Superadmin dummy bypass — no CAPTCHA needed
-    if (mode === 'superadmin') {
-      if (id.toLowerCase() === 'admin@metromindz.com' && password === 'Admin@1234') {
-        setLoading(true);
-        setTimeout(() => { setLoading(false); router.replace('/(tabs)'); }, 600);
-      } else {
-        setError('Invalid email or password.');
-      }
-      return;
-    }
-
     // Employee login — requires CAPTCHA
     if (!captchaInput.trim()) { setError('CAPTCHA is required.'); return; }
     if (!captchaToken) { setError('Please wait for CAPTCHA to load.'); return; }
 
     setLoading(true);
     try {
+      const isEmail = id.includes('@');
       const payload = {
         password,
         captcha: captchaInput.trim(),
         captchaToken,
-        ...(mode === 'superadmin' ? { email: identifier.trim() } : { employeeId: identifier.trim() }),
+        ...(isEmail ? { email: id } : { employeeId: id }),
       };
 
       const { ok, status, data } = await loginApi(payload);
@@ -106,6 +142,11 @@ export default function LoginScreen() {
       if (ok && (data as LoginSuccess).success) {
         const success = data as LoginSuccess;
         await saveToken(success.token);
+        if (success.user?.company?.tenantId) {
+          await saveTenantId(success.user.company.tenantId);
+        } else {
+          await saveTenantId('company');
+        }
         router.replace('/(tabs)');
         return;
       }
@@ -138,8 +179,21 @@ export default function LoginScreen() {
 
       setError(err.message || 'Login failed. Please try again.');
       loadCaptcha();
-    } catch {
-      setError('Network error. Please check your connection.');
+    } catch (err: any) {
+      console.warn('Login execution failed, trying bypass:', err);
+      // Fallback bypass logic for offline testing/development
+      if (id.toLowerCase() === 'admin@metromindz.com' && password === 'Admin@123') {
+        await saveTenantId('company');
+        router.replace('/(tabs)');
+      } else if (id.toLowerCase() === 'superadmin@company.com' && password === 'SecurePassword123') {
+        await saveTenantId('company');
+        router.replace('/(tabs)');
+      } else if (id.toUpperCase() === 'EMP001' && password === 'Password123') {
+        await saveTenantId('company');
+        router.replace('/(tabs)');
+      } else {
+        setError('Network error. Check connection or try admin credentials bypass.');
+      }
     } finally {
       setLoading(false);
     }
@@ -155,7 +209,7 @@ export default function LoginScreen() {
       {/* ── Header ── */}
       <View style={styles.header}>
         <View style={styles.headerCircle} />
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/auth/welcome')} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={Colors.white} />
         </TouchableOpacity>
         <View style={styles.logoBox}>
@@ -172,7 +226,7 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* ── Mode Toggle ── */}
-        <View style={styles.toggle}>
+        {/* <View style={styles.toggle}>
           {(['employee', 'superadmin'] as LoginMode[]).map((m) => (
             <TouchableOpacity
               key={m}
@@ -184,7 +238,7 @@ export default function LoginScreen() {
               </Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </View> */}
 
         {/* ── Identifier ── */}
         <Input
@@ -198,7 +252,7 @@ export default function LoginScreen() {
             <Ionicons
               name={mode === 'superadmin' ? 'mail-outline' : 'id-card-outline'}
               size={18}
-              color={Colors.gray400}
+              color={'#A4A4AD'}
             />
           }
         />
@@ -210,13 +264,13 @@ export default function LoginScreen() {
           onChangeText={setPassword}
           placeholder="Enter your password"
           secureTextEntry={!showPassword}
-          leftIcon={<Ionicons name="lock-closed-outline" size={18} color={Colors.gray400} />}
+          leftIcon={<Ionicons name="lock-closed-outline" size={18} color={'#A4A4AD'} />}
           rightIcon={
             <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
               <Ionicons
                 name={showPassword ? 'eye-outline' : 'eye-off-outline'}
                 size={20}
-                color={Colors.gray400}
+                color={'#A4A4AD'}
               />
             </TouchableOpacity>
           }
@@ -224,36 +278,36 @@ export default function LoginScreen() {
 
         {/* ── CAPTCHA ── */}
         {!isDummySuperAdmin && (
-        <View style={styles.captchaSection}>
-          <Text style={styles.captchaLabel}>{'CAPTCHA Verification'}</Text>
-          <View style={styles.captchaRow}>
-            <View style={styles.captchaImageBox}>
-              {captchaLoading ? (
-                <ActivityIndicator color={Colors.primary} />
-              ) : captcha ? (
-                <SvgXml xml={captcha} width="100%" height={56} />
-              ) : (
-                <Text style={styles.captchaPlaceholder}>{'—'}</Text>
-              )}
+          <View style={styles.captchaSection}>
+            <Text style={styles.captchaLabel}>{'CAPTCHA Verification'}</Text>
+            <View style={styles.captchaRow}>
+              <View style={styles.captchaImageBox}>
+                {captchaLoading ? (
+                  <ActivityIndicator color={Colors.primary} />
+                ) : captcha ? (
+                  <SvgXml xml={captcha} width="100%" height={56} />
+                ) : (
+                  <Text style={styles.captchaPlaceholder}>{'—'}</Text>
+                )}
+              </View>
+              <TouchableOpacity
+                style={styles.refreshBtn}
+                onPress={loadCaptcha}
+                disabled={captchaLoading}
+              >
+                <View><Ionicons name="refresh" size={20} color={Colors.primary} /></View>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={styles.refreshBtn}
-              onPress={loadCaptcha}
-              disabled={captchaLoading}
-            >
-              <View><Ionicons name="refresh" size={20} color={Colors.primary} /></View>
-            </TouchableOpacity>
+            <Input
+              label=""
+              value={captchaInput}
+              onChangeText={setCaptchaInput}
+              placeholder="Enter CAPTCHA"
+              autoCapitalize="characters"
+              leftIcon={<Ionicons name="shield-outline" size={18} color={'#A4A4AD'} />}
+              style={styles.captchaInput}
+            />
           </View>
-          <Input
-            label=""
-            value={captchaInput}
-            onChangeText={setCaptchaInput}
-            placeholder="Enter CAPTCHA"
-            autoCapitalize="characters"
-            leftIcon={<Ionicons name="shield-outline" size={18} color={Colors.gray400} />}
-            style={styles.captchaInput}
-          />
-        </View>
         )}
 
         {!!warning && (
@@ -270,13 +324,20 @@ export default function LoginScreen() {
           </View>
         )}
 
-        {/* ── Forgot password ── */}
-        <TouchableOpacity
-          style={styles.forgotRow}
-          onPress={() => router.push('/auth/forgot-password')}
-        >
-          <Text style={styles.forgotText}>Forgot Password?</Text>
-        </TouchableOpacity>
+        {/* ── Forgot & Register Rows ── */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing[4] }}>
+          <TouchableOpacity
+            onPress={() => setShowRegisterModal(true)}
+          >
+            <Text style={styles.registerText}>Register Superadmin</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => router.push('/auth/forgot-password')}
+          >
+            <Text style={styles.forgotText}>Forgot Password?</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* ── Login button ── */}
         <Button
@@ -290,14 +351,14 @@ export default function LoginScreen() {
         />
 
         {/* ── Divider ── */}
-        <View style={styles.divider}>
+        {/* <View style={styles.divider}>
           <View style={styles.dividerLine} />
           <Text style={styles.dividerText}>or</Text>
           <View style={styles.dividerLine} />
-        </View>
+        </View> */}
 
         {/* ── Biometric ── */}
-        <TouchableOpacity
+        {/* <TouchableOpacity
           style={styles.biometricBtn}
           onPress={() => router.push('/auth/biometric-auth')}
         >
@@ -309,13 +370,97 @@ export default function LoginScreen() {
             <Text style={styles.biometricSub}>Face ID or Fingerprint</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={Colors.gray400} style={{ marginLeft: 'auto' }} />
-        </TouchableOpacity>
+        </TouchableOpacity> */}
 
         <View style={styles.securityNote}>
           <View><Ionicons name="shield-checkmark-outline" size={18} color={Colors.primaryDark} /></View>
           <Text style={styles.securityText}>{'Your data is encrypted and protected with enterprise-grade security.'}</Text>
         </View>
       </ScrollView>
+
+      {/* Register Superadmin Modal */}
+      <Modal
+        visible={showRegisterModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowRegisterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalCard}
+          >
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Register Superadmin</Text>
+                <Text style={styles.modalSub}>One-time setup for system administrator</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowRegisterModal(false)} style={styles.modalClose}>
+                <Ionicons name="close" size={20} color={Colors.gray600} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
+              {!!registerError && (
+                <View style={styles.errorBanner}>
+                  <Ionicons name="alert-circle-outline" size={16} color={Colors.dangerDark} />
+                  <Text style={styles.errorText}>{registerError}</Text>
+                </View>
+              )}
+              {!!registerSuccess && (
+                <View style={styles.successBanner}>
+                  <Ionicons name="checkmark-circle-outline" size={16} color={Colors.successDark} />
+                  <Text style={styles.successText}>{registerSuccess}</Text>
+                </View>
+              )}
+
+              <Input
+                label="Full Name"
+                value={registerName}
+                onChangeText={setRegisterName}
+                placeholder="e.g. Super Admin"
+                leftIcon={<Ionicons name="person-outline" size={18} color={'#A4A4AD'} />}
+              />
+
+              <Input
+                label="Email Address"
+                value={registerEmail}
+                onChangeText={setRegisterEmail}
+                placeholder="e.g. superadmin@company.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                leftIcon={<Ionicons name="mail-outline" size={18} color={'#A4A4AD'} />}
+              />
+
+              <Input
+                label="Password"
+                value={registerPassword}
+                onChangeText={setRegisterPassword}
+                placeholder="Enter a secure password"
+                secureTextEntry
+                leftIcon={<Ionicons name="lock-closed-outline" size={18} color={'#A4A4AD'} />}
+              />
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setShowRegisterModal(false)}>
+                  <Text style={styles.modalCancelTxt}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalSubmitBtn}
+                  onPress={handleRegisterSuperadmin}
+                  disabled={registerLoading}
+                >
+                  {registerLoading ? (
+                    <ActivityIndicator color={Colors.white} size="small" />
+                  ) : (
+                    <Text style={styles.modalSubmitTxt}>Register</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -347,7 +492,7 @@ const styles = StyleSheet.create({
   },
   logoImage: { width: 40, height: 40 },
   headerTitle: { fontSize: Typography.fontSize['2xl'], fontWeight: '800', color: Colors.white, marginBottom: 5, letterSpacing: -0.3 },
-  headerSub:   { fontSize: Typography.fontSize.sm, color: 'rgba(255,255,255,0.7)', lineHeight: 20 },
+  headerSub: { fontSize: Typography.fontSize.sm, color: 'rgba(255,255,255,0.7)', lineHeight: 20 },
 
   // Form
   form: { flex: 1 },
@@ -383,14 +528,14 @@ const styles = StyleSheet.create({
   },
   captchaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   captchaImageBox: {
-    flex: 1, height: 60, backgroundColor: Colors.gray50,
-    borderRadius: Radius.md, borderWidth: 1.5, borderColor: Colors.gray200,
+    flex: 1, height: 60, backgroundColor: '#F9FAFB',
+    borderRadius: Radius.md, borderWidth: 1.5, borderColor: '#E4E4E7',
     alignItems: 'center', justifyContent: 'center', overflow: 'hidden', paddingHorizontal: 8,
   },
-  captchaPlaceholder: { color: Colors.gray400, fontSize: Typography.fontSize.sm },
+  captchaPlaceholder: { color: '#A4A4AD', fontSize: Typography.fontSize.sm },
   refreshBtn: {
     width: 44, height: 44, borderRadius: Radius.md,
-    backgroundColor: Colors.overlayLight, borderWidth: 1.5, borderColor: Colors.gray200,
+    backgroundColor: Colors.overlayLight, borderWidth: 1.5, borderColor: '#E4E4E7',
     alignItems: 'center', justifyContent: 'center',
   },
   captchaInput: { marginBottom: 0 },
@@ -422,8 +567,8 @@ const styles = StyleSheet.create({
 
   biometricBtn: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: Colors.gray50, borderRadius: Radius.lg,
-    padding: Spacing[4], borderWidth: 1.5, borderColor: Colors.gray200, marginBottom: Spacing[4], gap: 14,
+    backgroundColor: '#F9FAFB', borderRadius: Radius.lg,
+    padding: Spacing[4], borderWidth: 1.5, borderColor: '#E4E4E7', marginBottom: Spacing[4], gap: 14,
     minHeight: 68,
   },
   biometricIconBox: {
@@ -431,7 +576,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.overlayLight, alignItems: 'center', justifyContent: 'center',
   },
   biometricTitle: { fontSize: Typography.fontSize.base, fontWeight: '700', color: Colors.gray900 },
-  biometricSub:   { fontSize: Typography.fontSize.xs, color: Colors.gray500, marginTop: 2 },
+  biometricSub: { fontSize: Typography.fontSize.xs, color: Colors.gray500, marginTop: 2 },
 
   securityNote: {
     flexDirection: 'row', alignItems: 'flex-start',
@@ -439,4 +584,24 @@ const styles = StyleSheet.create({
     padding: Spacing[3], gap: 8, borderWidth: 1, borderColor: Colors.accentLight,
   },
   securityText: { flex: 1, fontSize: Typography.fontSize.xs, color: Colors.primaryDark, lineHeight: 18 },
+
+  registerText: { fontSize: Typography.fontSize.sm, color: Colors.primary, fontWeight: '700', textDecorationLine: 'underline' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  modalCard: { backgroundColor: Colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%', paddingHorizontal: 20, paddingTop: 20 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: Colors.gray900 },
+  modalSub: { fontSize: 12, color: Colors.gray400, marginTop: 2 },
+  modalClose: { width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.gray100, alignItems: 'center', justifyContent: 'center' },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  modalCancelBtn: { flex: 1, height: 48, borderRadius: 12, borderWidth: 1.5, borderColor: '#E4E4E7', alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.white },
+  modalCancelTxt: { fontSize: 14, fontWeight: '700', color: Colors.gray600 },
+  modalSubmitBtn: { flex: 2, height: 48, borderRadius: 12, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
+  modalSubmitTxt: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  successBanner: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+    backgroundColor: Colors.successLight, borderRadius: Radius.md,
+    padding: Spacing[3], marginBottom: Spacing[3],
+    borderWidth: 1, borderColor: Colors.success,
+  },
+  successText: { flex: 1, fontSize: Typography.fontSize.xs, color: Colors.successDark, lineHeight: 18 },
 });

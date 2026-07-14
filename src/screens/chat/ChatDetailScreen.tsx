@@ -2,12 +2,23 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput,
   TouchableOpacity, Platform, StatusBar, KeyboardAvoidingView,
-  Animated, Easing,
+  Animated, Easing, ActivityIndicator, Alert, Modal, RefreshControl
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../design-system/tokens';
-import { mockChats } from '../../data/mockData';
+import { mockChats, currentUser } from '../../data/mockData';
+import {
+  fetchMessages,
+  sendMessage,
+  reactToMessage,
+  deleteMessage,
+  clearConversationHistory,
+  markConversationAsRead,
+  fetchConversationMessages,
+  sendMessageAdmin,
+} from '../../services/chatService';
+import { fetchProfile } from '../../services/authService';
 
 const PRIMARY = '#3B82F6';
 const PRIMARY_LIGHT = '#EFF6FF';
@@ -19,6 +30,8 @@ type Message = {
   time: string;
   status?: 'sent' | 'delivered' | 'read';
   attachment?: { name: string; size: string };
+  senderName?: string;
+  reactions?: { user: string; emoji: string }[];
 };
 
 const SEED_MESSAGES: Record<string, Message[]> = {
@@ -95,7 +108,13 @@ function TypingIndicator() {
   );
 }
 
-function MessageBubble({ item, prevMine }: { item: Message; prevMine?: boolean }) {
+interface MessageBubbleProps {
+  item: Message;
+  prevMine?: boolean;
+  onLongPress: () => void;
+}
+
+function MessageBubble({ item, prevMine, onLongPress }: MessageBubbleProps) {
   const slideAnim = useRef(new Animated.Value(item.mine ? 20 : -20)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -116,17 +135,21 @@ function MessageBubble({ item, prevMine }: { item: Message; prevMine?: boolean }
     ]}>
       {!item.mine && showTail && (
         <View style={{ marginRight: 8, alignSelf: 'flex-end' }}>
-          <Avatar name="Sender" size={28} />
+          <Avatar name={item.senderName || "Sender"} size={28} />
         </View>
       )}
       {!item.mine && !showTail && <View style={{ width: 36 }} />}
 
-      <View style={[
-        styles.bubble,
-        item.mine ? styles.bubbleMine : styles.bubbleTheirs,
-        showTail && item.mine && styles.bubbleMineWithTail,
-        showTail && !item.mine && styles.bubbleTheirsWithTail,
-      ]}>
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onLongPress={onLongPress}
+        style={[
+          styles.bubble,
+          item.mine ? styles.bubbleMine : styles.bubbleTheirs,
+          showTail && item.mine && styles.bubbleMineWithTail,
+          showTail && !item.mine && styles.bubbleTheirsWithTail,
+        ]}
+      >
         {item.attachment && (
           <View style={[styles.attachCard, item.mine && styles.attachCardMine]}>
             <Ionicons name="document-attach-outline" size={20} color={item.mine ? 'rgba(255,255,255,0.9)' : PRIMARY} />
@@ -137,9 +160,28 @@ function MessageBubble({ item, prevMine }: { item: Message; prevMine?: boolean }
             <Ionicons name="download-outline" size={16} color={item.mine ? 'rgba(255,255,255,0.8)' : Colors.gray500} />
           </View>
         )}
+
+        {!item.mine && showTail && item.senderName && (
+          <Text style={styles.bubbleSenderName}>{item.senderName}</Text>
+        )}
+
         {item.text.length > 0 && (
           <Text style={[styles.bubbleText, item.mine && styles.bubbleTextMine]}>{item.text}</Text>
         )}
+
+        {item.reactions && item.reactions.length > 0 && (
+          <View style={styles.reactionsRow}>
+            {Array.from(new Set(item.reactions.map(r => r.emoji))).map((emoji, idx) => (
+              <View key={idx} style={styles.reactionBadge}>
+                <Text style={styles.reactionEmoji}>{emoji}</Text>
+                {item.reactions!.filter(r => r.emoji === emoji).length > 1 && (
+                  <Text style={styles.reactionCount}>{item.reactions!.filter(r => r.emoji === emoji).length}</Text>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+
         <View style={[styles.bubbleMeta, item.mine && { justifyContent: 'flex-end' }]}>
           <Text style={[styles.bubbleTime, item.mine && styles.bubbleTimeMine]}>{item.time}</Text>
           {item.mine && (
@@ -151,23 +193,107 @@ function MessageBubble({ item, prevMine }: { item: Message; prevMine?: boolean }
             />
           )}
         </View>
-      </View>
+      </TouchableOpacity>
     </Animated.View>
   );
 }
 
+const normalizeMessage = (item: any, currentUserId: string = currentUser.employeeId): Message => {
+  const mine = item.sender && typeof item.sender === 'object'
+    ? (item.sender._id === currentUserId || item.sender.id === currentUserId)
+    : (item.sender === currentUserId || item.mine);
+
+  let time = '';
+  if (item.createdAt) {
+    try {
+      time = new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      time = item.time || '';
+    }
+  }
+
+  return {
+    id: item._id || item.id || '',
+    text: item.text || '',
+    mine,
+    time: time || item.time || '',
+    status: item.status || 'read',
+    attachment: item.attachment || undefined,
+    senderName: item.sender && typeof item.sender === 'object' ? item.sender.name : (item.senderName || ''),
+    reactions: Array.isArray(item.reactions) ? item.reactions : [],
+  };
+};
+
 export default function ChatDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const chat = mockChats.find(c => c.id === id);
-  const [messages, setMessages] = useState<Message[]>(SEED_MESSAGES[id] ?? []);
+  const chat = mockChats.find(c => c.id === id) || { id, name: 'Active Conversation', isGroup: false };
+
+  // Messages states
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
+  const [myUserId, setMyUserId] = useState<string>(currentUser.employeeId);
+  const [userRole, setUserRole] = useState<'employee' | 'superadmin' | 'hr' | 'manager'>('employee');
+
+  // Options menus states
   const [showActions, setShowActions] = useState(false);
+  const [longPressedMessage, setLongPressedMessage] = useState<Message | null>(null);
+
   const listRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
   const headerScale = useRef(new Animated.Value(0.97)).current;
   const headerOpacity = useRef(new Animated.Value(0)).current;
+
+  const loadMessages = async (showIndicator = true) => {
+    if (showIndicator) setLoading(true);
+    try {
+      let selfId = currentUser.employeeId;
+      try {
+        const prof = await fetchProfile();
+        if (prof && prof.user) {
+          const role = prof.user.role || 'employee';
+          setUserRole(role);
+          if (prof.user._id) {
+            selfId = prof.user._id;
+            setMyUserId(prof.user._id);
+          }
+        } else if (prof && prof._id) {
+          selfId = prof._id;
+          setMyUserId(prof._id);
+        }
+      } catch (e) {
+        console.warn('Could not fetch user profile for chat ID, using fallback:', e);
+      }
+
+      let res;
+      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager') {
+        res = await fetchConversationMessages(id);
+      } else {
+        res = await fetchMessages(id);
+      }
+
+      let list: any[] = [];
+      if (res && res.success && Array.isArray(res.messages)) {
+        list = res.messages;
+      } else if (res && res.success && Array.isArray(res.data)) {
+        list = res.data;
+      } else if (Array.isArray(res)) {
+        list = res;
+      } else if (res && Array.isArray(res.data)) {
+        list = res.data;
+      }
+      setMessages(list.map(m => normalizeMessage(m, selfId)));
+    } catch (err) {
+      console.warn('Failed to load messages from API:', err);
+      setMessages([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     Animated.parallel([
@@ -175,26 +301,129 @@ export default function ChatDetailScreen() {
       Animated.spring(headerScale, { toValue: 1, tension: 80, friction: 12, useNativeDriver: true }),
     ]).start();
 
-    // Simulate typing after 1.5s
-    const t = setTimeout(() => { setTyping(true); setTimeout(() => setTyping(false), 2500); }, 1500);
-    return () => clearTimeout(t);
-  }, []);
+    loadMessages();
+    try {
+      markConversationAsRead(id);
+    } catch (e) {
+      console.warn('Failed to mark conversation as read:', e);
+    }
 
-  const send = () => {
-    if (!input.trim()) return;
-    const now = new Date();
-    const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const newMsg: Message = { id: Date.now().toString(), text: input.trim(), mine: true, time, status: 'sent' };
-    setMessages(prev => [...prev, newMsg]);
-    setInput('');
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+    // Auto-scroll on loading
+    const t = setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    }, 500);
+    return () => clearTimeout(t);
+  }, [id]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadMessages(false);
   };
 
-  if (!chat) return (
-    <View style={styles.center}>
-      <Text style={{ color: Colors.gray500 }}>Chat not found</Text>
-    </View>
-  );
+  // ── Send Message ──
+  const send = async () => {
+    if (!input.trim()) return;
+    const currentText = input.trim();
+    setInput('');
+
+    // Optimistic local update
+    const tempId = 'temp_' + Date.now();
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const localMsg: Message = { id: tempId, text: currentText, mine: true, time, status: 'sent' };
+    setMessages(prev => [...prev, localMsg]);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+
+    try {
+      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager') {
+        const payload = {
+          chatId: id,
+          content: currentText
+        };
+        await sendMessageAdmin(payload);
+      } else {
+        const formData = new FormData();
+        formData.append('conversationId', id);
+        formData.append('text', currentText);
+        await sendMessage(formData);
+      }
+      // Reload messages list
+      loadMessages(false);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to send message.');
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+    }
+  };
+
+  // ── Clear Conversation History ──
+  const handleClearHistory = () => {
+    setShowActions(false);
+    Alert.alert(
+      'Clear Conversation',
+      'Are you sure you want to delete all messages in this chat? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear Chat',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await clearConversationHistory(id);
+              setMessages([]);
+              Alert.alert('Success', 'Conversation history cleared.');
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to clear conversation history.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // ── React to Message ──
+  const handleReactToMessage = async (emoji: string) => {
+    if (!longPressedMessage) return;
+    const msgId = longPressedMessage.id;
+    setLongPressedMessage(null);
+    try {
+      const res = await reactToMessage(msgId, emoji);
+      if (res && res.success && Array.isArray(res.reactions)) {
+        setMessages(prev =>
+          prev.map(m => m.id === msgId ? { ...m, reactions: res.reactions } : m)
+        );
+      } else {
+        Alert.alert('Error', 'Failed to add reaction.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to add reaction.');
+    }
+  };
+
+  // ── Delete Message ──
+  const handleDeleteMessage = () => {
+    if (!longPressedMessage) return;
+    const msgId = longPressedMessage.id;
+    setLongPressedMessage(null);
+    Alert.alert(
+      'Delete Message',
+      'Are you sure you want to delete this message?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteMessage(msgId);
+              setMessages(prev => prev.filter(m => m.id !== msgId));
+            } catch (err: any) {
+              setMessages(prev => prev.filter(m => m.id !== msgId));
+              Alert.alert('Success', 'Message deleted locally.');
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const isOnline = !chat.isGroup && (chat as any).online;
   const allMessages = typing ? [...messages, { id: 'typing', text: '', mine: false, time: '' }] : messages;
@@ -223,7 +452,7 @@ export default function ChatDetailScreen() {
           <View style={styles.headerStatusRow}>
             {isOnline && <View style={styles.onlineDot} />}
             <Text style={[styles.headerSub, isOnline && { color: '#10B981' }]}>
-              {chat.isGroup ? `${(chat as any).members} members` : isOnline ? 'Active now' : 'Offline'}
+              {chat.isGroup ? `${(chat as any).members || 2} members` : isOnline ? 'Active now' : 'Offline'}
             </Text>
           </View>
         </View>
@@ -242,8 +471,12 @@ export default function ChatDetailScreen() {
 
         {showActions && (
           <View style={styles.actionMenu}>
-            {['View Profile', 'Search in Chat', 'Mute Notifications', 'Clear Chat'].map((label, i) => (
-              <TouchableOpacity key={i} style={[styles.actionMenuItem, i < 3 && { borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }]} onPress={() => setShowActions(false)}>
+            {['View Profile', 'Search in Chat', 'Clear Chat'].map((label, i) => (
+              <TouchableOpacity
+                key={i}
+                style={[styles.actionMenuItem, i < 2 && { borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }]}
+                onPress={() => label === 'Clear Chat' ? handleClearHistory() : setShowActions(false)}
+              >
                 <Text style={[styles.actionMenuText, label === 'Clear Chat' && { color: Colors.danger }]}>{label}</Text>
               </TouchableOpacity>
             ))}
@@ -252,24 +485,38 @@ export default function ChatDetailScreen() {
       </Animated.View>
 
       {/* Messages */}
-      <FlatList
-        ref={listRef}
-        data={allMessages}
-        keyExtractor={m => m.id}
-        contentContainerStyle={styles.msgList}
-        showsVerticalScrollIndicator={false}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-        renderItem={({ item, index }) => {
-          if (item.id === 'typing') return <TypingIndicator />;
-          const prev = index > 0 ? messages[index - 1] : undefined;
-          return <MessageBubble item={item} prevMine={prev?.mine} />;
-        }}
-      />
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={PRIMARY} />
+          <Text style={{ marginTop: 8, color: Colors.gray500 }}>Fetching messages...</Text>
+        </View>
+      ) : (
+        <FlatList
+          ref={listRef}
+          data={allMessages}
+          keyExtractor={m => m.id}
+          contentContainerStyle={styles.msgList}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={PRIMARY} />}
+          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+          renderItem={({ item, index }) => {
+            if (item.id === 'typing') return <TypingIndicator />;
+            const prev = index > 0 ? messages[index - 1] : undefined;
+            return (
+              <MessageBubble
+                item={item}
+                prevMine={prev?.mine}
+                onLongPress={() => setLongPressedMessage(item)}
+              />
+            );
+          }}
+        />
+      )}
 
       {/* Composer */}
       <View style={styles.composer}>
         <TouchableOpacity style={styles.composerBtn}>
-          <Ionicons name="add-circle-outline" size={24} color={Colors.gray500} />
+          <Ionicons name="add-circle-outline" size={24} color={'#A4A4AD'} />
         </TouchableOpacity>
         <View style={styles.composerInputWrap}>
           <TextInput
@@ -278,12 +525,12 @@ export default function ChatDetailScreen() {
             value={input}
             onChangeText={setInput}
             placeholder="Type a message..."
-            placeholderTextColor={Colors.gray400}
+            placeholderTextColor={'#A4A4AD'}
             multiline
             returnKeyType="default"
           />
           <TouchableOpacity style={styles.emojiBtn}>
-            <Ionicons name="happy-outline" size={20} color={Colors.gray400} />
+            <Ionicons name="happy-outline" size={20} color={'#A4A4AD'} />
           </TouchableOpacity>
         </View>
         {input.trim().length > 0 ? (
@@ -292,10 +539,41 @@ export default function ChatDetailScreen() {
           </TouchableOpacity>
         ) : (
           <TouchableOpacity style={styles.composerBtn}>
-            <Ionicons name="mic-outline" size={22} color={Colors.gray500} />
+            <Ionicons name="mic-outline" size={22} color={'#A4A4AD'} />
           </TouchableOpacity>
         )}
       </View>
+
+      {/* ── Modal 4: Message Long Press Context Modal ── */}
+      <Modal visible={longPressedMessage !== null} transparent animationType="fade" onRequestClose={() => setLongPressedMessage(null)}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setLongPressedMessage(null)} />
+          <View style={styles.contextCard}>
+            <Text style={styles.contextTitle}>React with Emoji</Text>
+            <View style={styles.emojiRow}>
+              {['👍', '❤️', '🎉', '🔥', '👏', '😂'].map(emoji => (
+                <TouchableOpacity key={emoji} style={styles.emojiButton} onPress={() => handleReactToMessage(emoji)}>
+                  <Text style={styles.emojiText}>{emoji}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.contextSeparator} />
+
+            {longPressedMessage && longPressedMessage.mine && (
+              <TouchableOpacity style={styles.contextAction} onPress={handleDeleteMessage}>
+                <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+                <Text style={styles.contextActionTextDanger}>Delete Message</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity style={styles.contextAction} onPress={() => setLongPressedMessage(null)}>
+              <Ionicons name="close-circle-outline" size={16} color={Colors.gray600} />
+              <Text style={styles.contextActionText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -306,7 +584,6 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#F8FAFF' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  // Header
   header: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#fff',
@@ -336,7 +613,6 @@ const styles = StyleSheet.create({
   actionMenuItem: { paddingHorizontal: 16, paddingVertical: 12 },
   actionMenuText: { fontSize: Typography.fontSize.sm, color: '#1E293B', fontWeight: '500' },
 
-  // Messages
   msgList: { paddingHorizontal: 12, paddingTop: 16, paddingBottom: 12, gap: 4 },
 
   bubbleRow: { flexDirection: 'row', alignItems: 'flex-end', marginVertical: 2 },
@@ -351,13 +627,13 @@ const styles = StyleSheet.create({
   bubbleTheirs: { backgroundColor: '#fff', borderBottomLeftRadius: 4 },
   bubbleMineWithTail: { borderBottomRightRadius: 4 },
   bubbleTheirsWithTail: { borderBottomLeftRadius: 4 },
+  bubbleSenderName: { fontSize: 10, fontWeight: '700', color: PRIMARY, marginBottom: 4 },
   bubbleText: { fontSize: Typography.fontSize.sm, color: '#1E293B', lineHeight: 20 },
   bubbleTextMine: { color: '#fff' },
   bubbleMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   bubbleTime: { fontSize: 10, color: Colors.gray400 },
   bubbleTimeMine: { color: 'rgba(255,255,255,0.65)' },
 
-  // Attachment card
   attachCard: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: '#EFF6FF', borderRadius: 10, padding: 10,
@@ -367,7 +643,6 @@ const styles = StyleSheet.create({
   attachName: { fontSize: Typography.fontSize.xs, fontWeight: '600', color: '#1E293B' },
   attachSize: { fontSize: 10, color: Colors.gray500, marginTop: 1 },
 
-  // Typing
   typingWrap: { flexDirection: 'row', alignItems: 'flex-end', paddingLeft: 44, marginVertical: 4 },
   typingBubble: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -377,7 +652,6 @@ const styles = StyleSheet.create({
   },
   typingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.gray400 },
 
-  // Composer
   composer: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 8,
     backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 10,
@@ -399,4 +673,22 @@ const styles = StyleSheet.create({
   },
   emojiBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
   sendBtn: { width: 42, height: 42, borderRadius: 13, backgroundColor: PRIMARY, alignItems: 'center', justifyContent: 'center', ...Shadow.md },
+
+  // Context overlay Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
+  contextCard: { backgroundColor: '#fff', width: '80%', borderRadius: 16, padding: 18, ...Shadow.lg },
+  contextTitle: { fontSize: 13, fontWeight: '700', color: Colors.gray600, marginBottom: 12 },
+  emojiRow: { flexDirection: 'row', justifyContent: 'space-around', marginVertical: 6 },
+  emojiButton: { padding: 8, borderRadius: 8, backgroundColor: '#F8FAFF' },
+  emojiText: { fontSize: 22 },
+  contextSeparator: { height: 1, backgroundColor: '#E5E7EB', marginVertical: 12 },
+  contextAction: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 },
+  contextActionText: { fontSize: 14, fontWeight: '600', color: Colors.gray800 },
+  contextActionTextDanger: { fontSize: 14, fontWeight: '700', color: Colors.danger },
+
+  // Reactions style
+  reactionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6, alignSelf: 'flex-start' },
+  reactionBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 999, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: '#E2E8F0' },
+  reactionEmoji: { fontSize: 12 },
+  reactionCount: { fontSize: 9, color: Colors.gray600, fontWeight: '700', marginLeft: 2 },
 });

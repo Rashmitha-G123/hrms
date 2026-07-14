@@ -15,7 +15,7 @@ export const Card: React.FC<CardProps> = ({
   style,
   onPress,
   elevated = false,
-  padding = Spacing[4],
+  padding = Spacing[3],
 }) => {
   const content = (
     <View style={[styles.card, elevated ? Shadow.md : Shadow.sm, { padding }, style]}>
@@ -52,7 +52,7 @@ export const KPIWidget: React.FC<KPIWidgetProps> = ({
     <View style={styles.kpiText}>
       <Text style={styles.kpiValue}>{value}</Text>
       <Text style={styles.kpiLabel} numberOfLines={1}>{label}</Text>
-      {sub && <Text style={styles.kpiSub}>{sub}</Text>}
+      {!!sub && <Text style={styles.kpiSub}>{sub}</Text>}
     </View>
   </TouchableOpacity>
 );
@@ -123,7 +123,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ icon, title, subtitle, a
   <View style={styles.emptyState}>
     {icon && <View style={styles.emptyIcon}>{icon}</View>}
     <Text style={styles.emptyTitle}>{title}</Text>
-    {subtitle && <Text style={styles.emptySub}>{subtitle}</Text>}
+    {!!subtitle && <Text style={styles.emptySub}>{subtitle}</Text>}
     {action && <View style={{ marginTop: 20 }}>{action}</View>}
   </View>
 );

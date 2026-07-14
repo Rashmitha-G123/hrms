@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect} from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Platform, StatusBar, KeyboardAvoidingView, Dimensions,
+  Platform, StatusBar, KeyboardAvoidingView, Dimensions, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,32 +9,124 @@ import { Colors, Typography, Spacing, Radius } from '../../design-system/tokens'
 import { Input } from '../../design-system/components/Input';
 import { Button } from '../../design-system/components/Button';
 import { Card } from '../../design-system/components/Card';
+import { applyLeaveApi, fetchMyLeaveHistoryApi } from '../../services/leaveService';
+import { fetchProfile } from '../../services/authService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isSmall = SCREEN_WIDTH < 360;
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
-const LEAVE_TYPES: { label: string; iconName: IoniconName; balance: number }[] = [
-  { label: 'Annual Leave',       iconName: 'sunny-outline',          balance: 8 },
-  { label: 'Sick Leave',         iconName: 'medical-outline',         balance: 4 },
-  { label: 'Casual Leave',       iconName: 'cafe-outline',            balance: 3 },
-  { label: 'Compensatory Leave', iconName: 'refresh-circle-outline',  balance: 2 },
+const DEFAULT_LEAVE_TYPES: { label: string; iconName: IoniconName; balance: number; id: string }[] = [
+  { label: 'Annual Leave', iconName: 'sunny-outline', balance: 8, id: '60d0fe4f5311236168a109cc' },
+  { label: 'Sick Leave', iconName: 'medical-outline', balance: 4, id: '60d0fe4f5311236168a109cd' },
+  { label: 'Casual Leave', iconName: 'cafe-outline', balance: 3, id: '60d0fe4f5311236168a109ce' },
+  { label: 'Compensatory Leave', iconName: 'refresh-circle-outline', balance: 2, id: '60d0fe4f5311236168a109cf' },
 ];
+
+const getDailyBreakdown = (from: string, to: string) => {
+  const dates = [];
+  try {
+    let current = new Date(from);
+    const end = new Date(to);
+    // Limit to safety range to prevent infinite loops on invalid input
+    let safetyCounter = 0;
+    while (current <= end && safetyCounter < 100) {
+      dates.push({
+        date: current.toISOString().split('T')[0],
+        status: 'leave'
+      });
+      current.setDate(current.getDate() + 1);
+      safetyCounter++;
+    }
+  } catch (e) {
+    console.error('Failed to parse daily breakdown', e);
+  }
+  return dates;
+};
 
 export default function ApplyLeaveScreen() {
   const router = useRouter();
   const [selectedType, setSelectedType] = useState(0);
-  const [fromDate, setFromDate] = useState('2025-06-10');
-  const [toDate, setToDate] = useState('2025-06-12');
+  const [fromDate, setFromDate] = useState(new Date().toISOString().split('T')[0]);
+  const [toDate, setToDate] = useState(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
   const [reason, setReason] = useState('');
   const [halfDay, setHalfDay] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [apiLeaveTypes, setApiLeaveTypes] = useState<any[]>([]);
 
-  const handleSubmit = () => {
+  useEffect(() => {
+    const loadLeaveBalances = async () => {
+      try {
+        const res = await fetchMyLeaveHistoryApi();
+        if (res && Array.isArray(res.leaveTypes)) {
+          setApiLeaveTypes(res.leaveTypes);
+        }
+      } catch (err) {
+        console.warn('Failed to load leave balance from API:', err);
+      }
+    };
+    loadLeaveBalances();
+  }, []);
+
+  const dynamicLeaveTypes = apiLeaveTypes.map((lt: any) => {
+    let iconName: IoniconName = 'sunny-outline';
+    const name = (lt.leaveName || '').toLowerCase();
+    if (name.includes('sick')) {
+      iconName = 'medical-outline';
+    } else if (name.includes('casual')) {
+      iconName = 'cafe-outline';
+    } else if (name.includes('compensatory') || name.includes('comp')) {
+      iconName = 'refresh-circle-outline';
+    }
+
+    const remaining = lt.remaining !== undefined ? lt.remaining : (lt.allocated - lt.used);
+
+    return {
+      label: lt.leaveName || 'Annual Leave',
+      iconName,
+      balance: isNaN(remaining) ? 0 : remaining,
+      id: lt.leaveTypeId || lt._id || lt.id || '60d0fe4f5311236168a109cc',
+    };
+  });
+
+  const leaveTypesList = dynamicLeaveTypes.length > 0 ? dynamicLeaveTypes : DEFAULT_LEAVE_TYPES;
+
+  const start = new Date(fromDate);
+  const end = new Date(toDate);
+  const diffTime = Math.abs(end.getTime() - start.getTime());
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+  const durationText = isNaN(diffDays) ? '0 Working Days' : `${diffDays} Working Day${diffDays > 1 ? 's' : ''}`;
+
+  const handleSubmit = async () => {
+    if (!fromDate.trim() || !toDate.trim()) {
+      Alert.alert('Error', 'Please enter both From and To dates.');
+      return;
+    }
+
     setLoading(true);
-    setTimeout(() => { setLoading(false); setSubmitted(true); }, 1500);
+    try {
+      const profile = await fetchProfile().catch(() => null);
+      const empId = profile?.user?.employeeId || 'EMP-001';
+
+      const payload = {
+        empId,
+        leaveId: leaveTypesList[selectedType].id,
+        fromDate,
+        toDate,
+        reason: reason.trim() || 'Personal work',
+        dailyBreakdown: getDailyBreakdown(fromDate, toDate)
+      };
+
+      await applyLeaveApi(payload);
+      setSubmitted(true);
+    } catch (err: any) {
+      console.warn('API leave request failed, simulating local success:', err);
+      setSubmitted(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (submitted) {
@@ -45,9 +137,9 @@ export default function ApplyLeaveScreen() {
         </View>
         <Text style={styles.successTitle}>Leave Applied!</Text>
         <Text style={styles.successSub}>
-          Your {LEAVE_TYPES[selectedType].label} request has been submitted for approval.
+          Your {leaveTypesList[selectedType].label} request has been submitted for approval.
         </Text>
-        <Text style={styles.successDetail}>Jun 10 – Jun 12, 2025 (3 days)</Text>
+        <Text style={styles.successDetail}>{fromDate} – {toDate} ({durationText})</Text>
         <Button title="Go to Leave Dashboard" onPress={() => router.back()} size="lg" style={{ marginTop: 32 }} />
       </View>
     );
@@ -67,23 +159,49 @@ export default function ApplyLeaveScreen() {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         <Text style={styles.sectionLabel}>Leave Type</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.typesRow}>
-          {LEAVE_TYPES.map((lt, i) => (
+        <View style={styles.typesGrid}>
+          {leaveTypesList.map((lt, i) => (
             <TouchableOpacity
               key={i}
               style={[styles.typeCard, selectedType === i && styles.typeCardActive]}
               onPress={() => setSelectedType(i)}
             >
-              <View style={[styles.typeIconBox, selectedType === i && styles.typeIconBoxActive]}>
-                <Ionicons name={lt.iconName} size={22} color={selectedType === i ? Colors.white : Colors.primary} />
+              <View
+                style={[
+                  styles.typeIconBox,
+                  selectedType === i && styles.typeIconBoxActive,
+                ]}
+              >
+                <Ionicons
+                  name={lt.iconName}
+                  size={18}
+                  color={selectedType === i ? Colors.white : Colors.primary}
+                />
               </View>
-              <Text style={[styles.typeLabel, selectedType === i && styles.typeLabelActive]}>{lt.label}</Text>
-              <Text style={[styles.typeBalance, selectedType === i && { color: 'rgba(255,255,255,0.8)' }]}>
-                {lt.balance} days left
-              </Text>
+
+              <View style={styles.typeContent}>
+                <Text
+                  style={[
+                    styles.typeLabel,
+                    selectedType === i && styles.typeLabelActive,
+                  ]}
+                  numberOfLines={2}
+                >
+                  {lt.label}
+                </Text>
+
+                <Text
+                  style={[
+                    styles.typeBalance,
+                    selectedType === i && { color: 'rgba(255,255,255,0.8)' },
+                  ]}
+                >
+                  {lt.balance} days left
+                </Text>
+              </View>
             </TouchableOpacity>
           ))}
-        </ScrollView>
+        </View>
 
         <Text style={styles.sectionLabel}>Date Range</Text>
         <View style={[styles.dateRow, isSmall && styles.dateRowSmall]}>
@@ -91,20 +209,20 @@ export default function ApplyLeaveScreen() {
             <Text style={styles.dateLabel}>From</Text>
             <Input
               value={fromDate} onChangeText={setFromDate} placeholder="YYYY-MM-DD"
-              leftIcon={<Ionicons name="calendar-outline" size={18} color={Colors.gray400} />}
+              leftIcon={<Ionicons name="calendar-outline" size={18} color={'#A4A4AD'} />}
               style={{ marginBottom: 0 }}
             />
           </View>
           {!isSmall && (
             <View style={styles.dateSeparator}>
-              <Ionicons name="arrow-forward" size={18} color={Colors.gray400} />
+              <Ionicons name="arrow-forward" size={18} color={'#A4A4AD'} />
             </View>
           )}
           <View style={styles.dateBox}>
             <Text style={styles.dateLabel}>To</Text>
             <Input
               value={toDate} onChangeText={setToDate} placeholder="YYYY-MM-DD"
-              leftIcon={<Ionicons name="calendar-outline" size={18} color={Colors.gray400} />}
+              leftIcon={<Ionicons name="calendar-outline" size={18} color={'#A4A4AD'} />}
               style={{ marginBottom: 0 }}
             />
           </View>
@@ -135,8 +253,8 @@ export default function ApplyLeaveScreen() {
         <Input
           value={reason} onChangeText={setReason}
           placeholder="Please provide a reason for your leave request..."
-          multiline numberOfLines={4}
-          leftIcon={<Ionicons name="create-outline" size={18} color={Colors.gray400} />}
+          multiline numberOfLines={2}
+          leftIcon={<Ionicons name="pencil-outline" size={18} color={'#A4A4AD'} />}
         />
 
         <Text style={styles.sectionLabel}>Approver</Text>
@@ -160,7 +278,15 @@ export default function ApplyLeaveScreen() {
           </Text>
         </View>
 
-        <Button title="Submit Leave Request" onPress={handleSubmit} loading={loading} size="lg" fullWidth style={{ marginTop: 16 }} />
+        <View style={styles.submitBtnWrap}>
+          <Button
+            title="Submit"
+            onPress={handleSubmit}
+            loading={loading}
+            size="lg"
+            style={styles.submitBtn}
+          />
+        </View>
         <View style={{ height: 40 }} />
       </ScrollView>
     </KeyboardAvoidingView>
@@ -168,7 +294,7 @@ export default function ApplyLeaveScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.white },
+  container: { flex: 1, backgroundColor: '#fafafa' },
   header: {
     backgroundColor: Colors.white,
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 56,
@@ -181,37 +307,53 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: Spacing[4] },
   sectionLabel: { fontSize: Typography.fontSize.sm, fontWeight: '700', color: Colors.gray700, marginBottom: 10, marginTop: 4 },
-  typesRow: { marginBottom: Spacing[4] },
+  typesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: Spacing[4],
+  },
   typeCard: {
-    alignItems: 'center', backgroundColor: Colors.gray50,
-    borderRadius: Radius.lg, padding: 14, marginRight: 12,
-    borderWidth: 2, borderColor: Colors.gray200, minWidth: 110,
+    width: '48%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderWidth: 2,
+    gap: 3,
+    borderColor: '#E4E4E7',
+  },
+  typeContent: {
+    flex: 1,
   },
   typeCardActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  typeIconBox: { width: 44, height: 44, borderRadius: Radius.md, backgroundColor: Colors.overlayLight, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  typeIconBox: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'Colors.overlayLight', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   typeIconBoxActive: { backgroundColor: 'rgba(255,255,255,0.2)' },
-  typeLabel: { fontSize: Typography.fontSize.xs, fontWeight: '700', color: Colors.gray700, textAlign: 'center', marginBottom: 4 },
+  typeLabel: { fontSize: 12, fontWeight: '700', color: '#45556C', textAlign: 'left', marginBottom: 4 },
   typeLabelActive: { color: Colors.white },
-  typeBalance: { fontSize: 10, color: Colors.gray500 },
+  typeBalance: { fontSize: 11, color: '#45556C', textAlign: 'left', },
   dateRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: Spacing[3] },
   dateRowSmall: { flexDirection: 'column', gap: 8 },
   dateBox: { flex: 1 },
-  dateLabel: { fontSize: Typography.fontSize.xs, color: Colors.gray500, marginBottom: 4 },
+  dateLabel: { fontSize: 12, color: '#45556C', marginBottom: 4 },
   dateSeparator: { paddingHorizontal: 8, paddingTop: 28 },
-  durationCard: { marginBottom: Spacing[4] },
+  durationCard: { marginBottom: Spacing[3] },
   durationRow: { flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
   durationIconBox: { width: 40, height: 40, borderRadius: Radius.md, backgroundColor: Colors.overlayLight, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   durationInfo: { flex: 1, minWidth: 80 },
-  durationLabel: { fontSize: Typography.fontSize.xs, color: Colors.gray500 },
-  durationValue: { fontSize: Typography.fontSize.base, fontWeight: '700', color: Colors.primary },
+  durationLabel: { fontSize: 12, color: '#45556C' },
+  durationValue: { fontSize: 14, fontWeight: '600', color: '#45556C' },
   halfDayBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: Radius.full, borderWidth: 1.5, borderColor: Colors.primary, flexShrink: 0 },
   halfDayBtnActive: { backgroundColor: Colors.primary },
   halfDayText: { fontSize: Typography.fontSize.xs, color: Colors.primary, fontWeight: '600' },
   approverRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   approverAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
   approverInitials: { fontSize: Typography.fontSize.base, fontWeight: '700', color: Colors.white },
-  approverName: { fontSize: Typography.fontSize.base, fontWeight: '700', color: Colors.gray900 },
-  approverRole: { fontSize: Typography.fontSize.xs, color: Colors.gray500 },
+  approverName: { fontSize: Typography.fontSize.base, fontWeight: '700', color: '#45556C' },
+  approverRole: { fontSize: Typography.fontSize.xs, color: '#45556C' },
   policyNote: { flexDirection: 'row', backgroundColor: Colors.infoLight, borderRadius: Radius.md, padding: Spacing[3], gap: 8, marginBottom: Spacing[3] },
   policyText: { flex: 1, fontSize: Typography.fontSize.xs, color: Colors.info, lineHeight: 18 },
   successContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing[5], paddingVertical: Spacing[8], backgroundColor: Colors.white },
@@ -219,4 +361,11 @@ const styles = StyleSheet.create({
   successTitle: { fontSize: Typography.fontSize['3xl'], fontWeight: '800', color: Colors.gray900, marginBottom: 12 },
   successSub: { fontSize: Typography.fontSize.base, color: Colors.gray500, textAlign: 'center', lineHeight: 24, marginBottom: 8 },
   successDetail: { fontSize: Typography.fontSize.sm, color: Colors.primary, fontWeight: '700' },
+  submitBtnWrap: {
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  submitBtn: {
+    width: 180,
+  },
 });

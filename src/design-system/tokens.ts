@@ -1,7 +1,8 @@
 // MetroMindz HRMS — Design Tokens
 export const Colors = {
   // Primary Brand — smooth sky blue
-  primary: '#4DA8DA',
+  primary: '#2b7eff',
+  primary1: '#4DA8DA',
   primaryLight: '#82C4E8',
   primaryDark: '#2E86B5',
   primaryGradientStart: '#56CCF2',
@@ -66,11 +67,11 @@ export const Colors = {
 
 export const Typography = {
   fontFamily: {
-    regular: 'Inter_400Regular',
-    medium: 'Inter_500Medium',
-    semiBold: 'Inter_600SemiBold',
-    bold: 'Inter_700Bold',
-    extraBold: 'Inter_800ExtraBold',
+    regular: 'Poppins_400Regular',
+    medium: 'Poppins_500Medium',
+    semiBold: 'Poppins_600SemiBold',
+    bold: 'Poppins_700Bold',
+    extraBold: 'Poppins_800ExtraBold',
   },
   fontSize: {
     xs: 11,

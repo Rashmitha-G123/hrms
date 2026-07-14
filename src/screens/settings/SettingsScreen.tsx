@@ -41,6 +41,7 @@ const SETTING_SECTIONS: {
     title: 'Privacy & Security',
     items: [
       { iconName: 'shield-checkmark-outline', iconColor: Colors.primary, label: 'Privacy Settings', route: '/settings/privacy' },
+      { iconName: 'list-circle-outline',       iconColor: Colors.accent,  label: 'Activity Logs (Audit Trail)', route: '/settings/activity-logs' },
       { iconName: 'server-outline',           iconColor: Colors.accent,  label: 'Data & Storage',   route: '/settings/data' },
       { iconName: 'document-text-outline',    iconColor: Colors.gray600, label: 'Terms of Service', route: '/settings/terms' },
       { iconName: 'lock-open-outline',        iconColor: Colors.gray600, label: 'Privacy Policy',   route: '/settings/privacy-policy' },
@@ -91,7 +92,7 @@ export default function SettingsScreen() {
                       <Text style={styles.settingLabel}>{item.label}</Text>
                     </View>
                     <View style={styles.settingRight}>
-                      {item.value && <Text style={styles.settingValue}>{item.value}</Text>}
+                      {!!item.value && <Text style={styles.settingValue}>{item.value}</Text>}
                       {item.toggle ? (
                         <Switch
                           value={toggles[item.key!] ?? false}

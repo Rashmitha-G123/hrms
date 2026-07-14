@@ -83,7 +83,7 @@ export default function WelcomeScreen() {
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      <LinearGradient colors={['#56CCF2', '#4DA8DA']} style={[styles.hero, { height: heroH }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+      <LinearGradient colors={['#2b7eff', '#2b7eff']} style={[styles.hero, { height: heroH }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
         <View style={styles.blob1} />
         <View style={styles.blob2} />
 
@@ -119,7 +119,7 @@ export default function WelcomeScreen() {
           <Text style={[styles.ctaTitle, isSmall && { fontSize: 14 }]}>{'Ready to get started?'}</Text>
           <Animated.View style={{ transform: [{ scale: btnScale }] }}>
             <TouchableOpacity activeOpacity={1} onPressIn={onBtnIn} onPressOut={onBtnOut} onPress={() => router.push('/auth/login' as any)}>
-              <LinearGradient colors={['#56CCF2', '#4DA8DA']} style={[styles.ctaBtn, S.md]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+              <LinearGradient colors={['#2b7eff', '#2b7eff']} style={[styles.ctaBtn, S.md]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
                 <Text style={[styles.ctaBtnText, isSmall && { fontSize: 13 }]}>{'Continue to Dashboard'}</Text>
                 <Ionicons name="arrow-forward" size={18} color="#fff" />
               </LinearGradient>

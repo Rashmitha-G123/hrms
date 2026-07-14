@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Platform, StatusBar,
+  Platform, StatusBar, ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle } from 'react-native-svg';
@@ -10,7 +10,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../design-system/tokens';
 import { SectionHeader } from '../../design-system/components/Card';
 import { Badge, statusToVariant } from '../../design-system/components/Badge';
-import { mockLeaves, currentUser } from '../../data/mockData';
+// import { mockLeaves, currentUser } from '../../data/mockData';
+import { fetchMyLeaveHistoryApi } from '../../services/leaveService';
+import { fetchProfile } from '../../services/authService';
 
 // ── Circular Progress Ring ────────────────────────────────────────────────────
 function RingProgress({ value, total, color, size = 64 }: { value: number; total: number; color: string; size?: number }) {
@@ -31,27 +33,27 @@ function RingProgress({ value, total, color, size = 64 }: { value: number; total
   );
 }
 
-// ── Leave type config ─────────────────────────────────────────────────────────
-const LEAVE_TYPES = [
-  {
-    label: 'Annual', icon: 'sunny-outline' as const,
-    total: currentUser.leaveBalance.annual,
-    remaining: currentUser.leaveBalance.remaining.annual,
-    color: Colors.primary,
-  },
-  {
-    label: 'Sick', icon: 'medical-outline' as const,
-    total: currentUser.leaveBalance.sick,
-    remaining: currentUser.leaveBalance.remaining.sick,
-    color: Colors.danger,
-  },
-  {
-    label: 'Casual', icon: 'cafe-outline' as const,
-    total: currentUser.leaveBalance.casual,
-    remaining: currentUser.leaveBalance.remaining.casual,
-    color: Colors.accent,
-  },
-];
+// // ── Leave type config ─────────────────────────────────────────────────────────
+// const LEAVE_TYPES = [
+//   {
+//     label: 'Annual', icon: 'sunny-outline' as const,
+//     total: currentUser.leaveBalance.annual,
+//     remaining: currentUser.leaveBalance.remaining.annual,
+//     color: Colors.primary,
+//   },
+//   {
+//     label: 'Sick', icon: 'medical-outline' as const,
+//     total: currentUser.leaveBalance.sick,
+//     remaining: currentUser.leaveBalance.remaining.sick,
+//     color: Colors.danger,
+//   },
+//   {
+//     label: 'Casual', icon: 'cafe-outline' as const,
+//     total: currentUser.leaveBalance.casual,
+//     remaining: currentUser.leaveBalance.remaining.casual,
+//     color: Colors.accent,
+//   },
+// ];
 
 const LEAVE_ICON: Record<string, 'medical-outline' | 'cafe-outline' | 'sunny-outline'> = {
   'Sick Leave': 'medical-outline',
@@ -68,13 +70,87 @@ function fmt(dateStr: string) {
 export default function LeaveScreen() {
   const router = useRouter();
   const [filter, setFilter] = useState<typeof FILTERS[number]>('all');
+  const [leaves, setLeaves] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<any>(null);
 
-  const filtered = filter === 'all' ? mockLeaves : mockLeaves.filter(l => l.status === filter);
+  const loadLeaveHistory = useCallback(async () => {
+    setLoading(true);
+    try {
+      const profileRes = await fetchProfile().catch(() => null);
+      if (profileRes && profileRes.user) {
+        setProfile(profileRes.user);
+      }
+
+      const res = await fetchMyLeaveHistoryApi();
+      if (res && Array.isArray(res.leaveTypes)) {
+        const list: any[] = [];
+        res.leaveTypes.forEach((lt: any) => {
+          if (Array.isArray(lt.applications)) {
+            lt.applications.forEach((app: any) => {
+              list.push({
+                id: `${lt.leaveName}-${app.fromDate}`,
+                type: lt.leaveName,
+                from: app.fromDate,
+                to: app.toDate,
+                days: app.numberOfDays,
+                status: app.status === 'pending' || app.status === 'approved' || app.status === 'rejected' ? app.status : 'pending',
+                reason: app.reason || 'Personal work',
+                appliedOn: app.appliedOn || new Date(app.fromDate).toLocaleDateString(),
+              });
+            });
+          }
+        });
+        setLeaves(list);
+      } else {
+        setLeaves([]);
+      }
+    } catch (err) {
+      console.warn('Failed to load leave history:', err);
+      setLeaves([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadLeaveHistory();
+  }, [loadLeaveHistory]);
+
+  const filtered = filter === 'all' ? leaves : leaves.filter(l => l.status === filter);
+
+  const balance = profile?.leaveBalance || {
+    annual: 12,
+    sick: 6,
+    casual: 5,
+    remaining: { annual: 8, sick: 4, casual: 3 },
+  };
+
+  const LEAVE_TYPES = [
+    {
+      label: 'Annual', icon: 'sunny-outline' as const,
+      total: balance.annual || 0,
+      remaining: balance.remaining?.annual ?? 0,
+      color: Colors.primary,
+    },
+    {
+      label: 'Sick', icon: 'medical-outline' as const,
+      total: balance.sick || 0,
+      remaining: balance.remaining?.sick ?? 0,
+      color: Colors.danger,
+    },
+    {
+      label: 'Casual', icon: 'cafe-outline' as const,
+      total: balance.casual || 0,
+      remaining: balance.remaining?.casual ?? 0,
+      color: Colors.accent,
+    },
+  ];
 
   const totalRemaining =
-    currentUser.leaveBalance.remaining.annual +
-    currentUser.leaveBalance.remaining.sick +
-    currentUser.leaveBalance.remaining.casual;
+    (balance.remaining?.annual ?? 0) +
+    (balance.remaining?.sick ?? 0) +
+    (balance.remaining?.casual ?? 0);
 
   return (
     <View style={styles.root}>
@@ -187,42 +263,48 @@ export default function LeaveScreen() {
         </ScrollView>
 
         {/* Leave Cards */}
-        {filtered.map(leave => {
-          const iconName = LEAVE_ICON[leave.type] ?? 'sunny-outline';
-          const variant = statusToVariant[leave.status] ?? 'neutral';
-          const accentColor =
-            leave.status === 'approved' ? Colors.success :
-            leave.status === 'rejected' ? Colors.danger : Colors.warning;
-          return (
-            <TouchableOpacity key={leave.id} style={[styles.leaveCard, Shadow.sm]} onPress={() => router.push('/leaves/apply')} activeOpacity={0.85}>
-              <View style={[styles.leaveAccent, { backgroundColor: accentColor }]} />
-              <View style={styles.leaveBody}>
-                <View style={styles.leaveTop}>
-                  <View style={styles.leaveIconBox}>
-                    <Ionicons name={iconName} size={18} color={accentColor} />
+        {loading ? (
+          <ActivityIndicator size="small" color={Colors.primary} style={{ marginTop: 24 }} />
+        ) : filtered.length === 0 ? (
+          <Text style={{ textAlign: 'center', color: Colors.gray400, marginTop: 24, fontSize: 13 }}>No leave requests found</Text>
+        ) : (
+          filtered.map(leave => {
+            const iconName = LEAVE_ICON[leave.type] ?? 'sunny-outline';
+            const variant = statusToVariant[leave.status] ?? 'neutral';
+            const accentColor =
+              leave.status === 'approved' ? Colors.success :
+                leave.status === 'rejected' ? Colors.danger : Colors.warning;
+            return (
+              <TouchableOpacity key={leave.id} style={[styles.leaveCard, Shadow.sm]} onPress={() => router.push('/leaves/apply')} activeOpacity={0.85}>
+                <View style={[styles.leaveAccent, { backgroundColor: accentColor }]} />
+                <View style={styles.leaveBody}>
+                  <View style={styles.leaveTop}>
+                    <View style={styles.leaveIconBox}>
+                      <Ionicons name={iconName} size={18} color={accentColor} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.leaveType}>{leave.type}</Text>
+                      <Text style={styles.leaveReason} numberOfLines={1}>{leave.reason}</Text>
+                    </View>
+                    <Badge label={leave.status} variant={variant} dot />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.leaveType}>{leave.type}</Text>
-                    <Text style={styles.leaveReason} numberOfLines={1}>{leave.reason}</Text>
-                  </View>
-                  <Badge label={leave.status} variant={variant} dot />
-                </View>
 
-                <View style={styles.leaveMeta}>
-                  <View style={styles.leaveDatePill}>
-                    <Ionicons name="calendar-outline" size={11} color={Colors.primary} />
-                    <Text style={styles.leaveDateText}>{fmt(leave.from)} – {fmt(leave.to)}</Text>
+                  <View style={styles.leaveMeta}>
+                    <View style={styles.leaveDatePill}>
+                      <Ionicons name="calendar-outline" size={11} color={Colors.primary} />
+                      <Text style={styles.leaveDateText}>{fmt(leave.from)} – {fmt(leave.to)}</Text>
+                    </View>
+                    <View style={[styles.leaveDayPill, { backgroundColor: accentColor + '15' }]}>
+                      <Text style={[styles.leaveDayText, { color: accentColor }]}>{leave.days}d</Text>
+                    </View>
                   </View>
-                  <View style={[styles.leaveDayPill, { backgroundColor: accentColor + '15' }]}>
-                    <Text style={[styles.leaveDayText, { color: accentColor }]}>{leave.days}d</Text>
-                  </View>
-                </View>
 
-                <Text style={styles.leaveApplied}>Applied {leave.appliedOn}</Text>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
+                  <Text style={styles.leaveApplied}>Applied {leave.appliedOn}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })
+        )}
 
         <View style={{ height: 110 }} />
       </ScrollView>

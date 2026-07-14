@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
   email: { color: Colors.white, fontWeight: '700' },
   body: { flex: 1, paddingHorizontal: Spacing[6], paddingTop: 40 },
   otpRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 24 },
-  otpBox: { width: 52, height: 60, borderWidth: 2, borderColor: Colors.gray200, borderRadius: Radius.md, textAlign: 'center', fontSize: Typography.fontSize['2xl'], fontWeight: '700', color: Colors.gray900, backgroundColor: Colors.gray50 },
+  otpBox: { width: 52, height: 60, borderWidth: 2, borderColor: Colors.gray200, borderRadius: Radius.md, textAlign: 'center', fontSize: Typography.fontSize['2xl'], fontWeight: '700', color: Colors.gray900, backgroundColor: '#F9FAFB', },
   otpBoxFilled: { borderColor: Colors.primary, backgroundColor: Colors.overlayLight, color: Colors.primary },
   timerRow: { alignItems: 'center', marginBottom: 24 },
   timerContent: { flexDirection: 'row', alignItems: 'center', gap: 4 },

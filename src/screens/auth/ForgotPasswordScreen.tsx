@@ -38,7 +38,7 @@ export default function ForgotPasswordScreen() {
             <Input
               label="Work Email" value={email} onChangeText={setEmail}
               placeholder="you@metromindz.com" keyboardType="email-address"
-              leftIcon={<Ionicons name="mail-outline" size={18} color={Colors.gray400} />}
+              leftIcon={<Ionicons name="mail-outline" size={18} color={'#A4A4AD'} />}
             />
             <Button title="Send Reset Link" onPress={handleSend} loading={loading} size="lg" fullWidth style={{ marginTop: 8 }} />
             <TouchableOpacity onPress={() => router.back()} style={styles.backLink}>

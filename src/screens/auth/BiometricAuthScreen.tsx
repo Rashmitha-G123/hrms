@@ -77,7 +77,13 @@ export default function BiometricAuthScreen() {
 
         {!scanning && !success && (
           <View style={styles.options}>
-            <Button title="Use Password Instead" variant="outline" size="md" onPress={() => router.replace('/auth/login')} style={styles.optionBtn} />
+            <Button title="Use Password Instead" variant="outline" size="md" onPress={() => router.replace('/auth/login')}  style={[
+              styles.optionBtn,
+              {
+                backgroundColor: '#FFFFFF',
+                borderColor: '#FFFFFF',
+              },
+            ]} />
             <TouchableOpacity onPress={() => router.replace('/auth/login')} style={styles.switchUser}>
               <View><Ionicons name="swap-horizontal-outline" size={14} color="rgba(255,255,255,0.5)" /></View>
               <Text style={styles.switchText}>{'Switch Account'}</Text>
@@ -91,7 +97,7 @@ export default function BiometricAuthScreen() {
 
 const styles = StyleSheet.create({
   container:  { flex: 1 },
-  bg:         { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.primaryDark },
+  bg:         { ...StyleSheet.absoluteFill, backgroundColor: Colors.primary },
   backBtn:    { position: 'absolute', top: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 16 : 60, left: Spacing[5], zIndex: 10 },
   content:    { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing[6] },
   userCard:   { alignItems: 'center', marginBottom: 60 },

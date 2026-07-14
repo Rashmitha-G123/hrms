@@ -39,7 +39,7 @@ export const Input: React.FC<InputProps> = ({
 
   return (
     <View style={[styles.wrapper, style]}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {!!label && <Text style={styles.label}>{label}</Text>}
       <View
         style={[
           styles.container,
@@ -48,12 +48,21 @@ export const Input: React.FC<InputProps> = ({
           !editable && styles.disabled,
         ]}
       >
-        {leftIcon && <View style={styles.iconLeft}>{leftIcon}</View>}
+        {leftIcon && (
+          <View
+            style={[
+              styles.iconLeft,
+              multiline && styles.iconLeftMultiline,
+            ]}
+          >
+            {leftIcon}
+          </View>
+        )}
         <TextInput
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
-          placeholderTextColor={Colors.gray400}
+          placeholderTextColor={'#A4A4AD'}
           secureTextEntry={secureTextEntry}
           keyboardType={keyboardType}
           autoCapitalize={autoCapitalize}
@@ -71,7 +80,7 @@ export const Input: React.FC<InputProps> = ({
         />
         {rightIcon && <View style={styles.iconRight}>{rightIcon}</View>}
       </View>
-      {error && <Text style={styles.error}>{error}</Text>}
+      {!!error && <Text style={styles.error}>{error}</Text>}
     </View>
   );
 };
@@ -90,10 +99,10 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.gray50,
+    backgroundColor: '#F9FAFB',
     borderRadius: Radius.md,
     borderWidth: 1.5,
-    borderColor: Colors.gray200,
+    borderColor: '#E4E4E7',
   },
   focused: {
     borderColor: Colors.primary,
@@ -110,8 +119,8 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 14,
     paddingHorizontal: 14,
-    fontSize: Typography.fontSize.base,
-    color: Colors.gray900,
+    fontSize: 13,
+    color: '#A4A4AD',
     minHeight: 48,
   },
   inputWithLeft: {
@@ -122,6 +131,12 @@ const styles = StyleSheet.create({
   },
   iconLeft: {
     paddingLeft: 14,
+    justifyContent: 'center',
+  },
+
+  iconLeftMultiline: {
+    alignSelf: 'flex-start',
+    paddingTop: 14,
   },
   iconRight: {
     paddingRight: 14,

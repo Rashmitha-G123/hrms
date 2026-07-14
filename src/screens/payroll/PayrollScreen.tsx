@@ -98,7 +98,7 @@ export default function PayrollScreen() {
         {/* Payslip History */}
         <SectionHeader title="Payslip History" />
         {mockPayslips.map(slip => (
-          <Card key={slip.id} onPress={() => {}}>
+          <Card key={slip.id} onPress={() => { }}>
             <View style={styles.slipRow}>
               <View style={styles.slipIcon}>
                 <Ionicons name="wallet-outline" size={22} color={Colors.primary} />

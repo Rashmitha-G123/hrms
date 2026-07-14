@@ -13,18 +13,18 @@ interface BadgeProps {
 }
 
 const variantConfig: Record<BadgeVariant, { bg: string; text: string; dot: string }> = {
-  success:  { bg: Colors.successLight, text: Colors.successDark, dot: Colors.success },
-  warning:  { bg: Colors.warningLight, text: Colors.warningDark, dot: Colors.warning },
-  danger:   { bg: Colors.dangerLight,  text: Colors.dangerDark,  dot: Colors.danger },
-  info:     { bg: Colors.infoLight,    text: Colors.info,        dot: Colors.info },
+  success:  { bg: '#E3F7EB', text: '#04CA52', dot: '#04CA52' },
+  warning:  { bg: '#FCF2E3', text: '#FE9A00', dot: '#FE9A00' },
+  danger:   { bg: '#FDEDE3',  text: '#FF7312',  dot: '#FF7312' },
+  info:     { bg: '#E6EFFC',    text: '#3E8AFF',        dot: '#3E8AFF' },
   primary:  { bg: Colors.overlayLight, text: Colors.primary,     dot: Colors.primary },
-  neutral:  { bg: Colors.gray100,      text: Colors.gray600,     dot: Colors.gray500 },
+  neutral:  { bg: '#F4F4F5',      text: '#52525C',     dot: '#52525C' },
 };
 
 export const statusToVariant: Record<string, BadgeVariant> = {
   active: 'success', present: 'success', approved: 'success', paid: 'success', completed: 'success', won: 'success',
   pending: 'warning', 'in-progress': 'info', 'on-hold': 'warning', negotiation: 'warning', proposal: 'info', qualified: 'primary',
-  absent: 'danger', rejected: 'danger', overdue: 'danger', lost: 'danger',
+  absent: 'danger', rejected: 'danger', overdue: 'danger', lost: 'danger',paused: 'warning',
   late: 'warning', weekend: 'neutral', draft: 'neutral', todo: 'neutral', new: 'info', working: 'success',
 };
 
@@ -82,6 +82,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.4,
   },
-  textSm: { fontSize: 10 },
+  textSm: { fontSize: 9 },
   textMd: { fontSize: 12 },
 });

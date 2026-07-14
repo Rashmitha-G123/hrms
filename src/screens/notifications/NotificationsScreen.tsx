@@ -1,41 +1,59 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, Platform, StatusBar,
+  TouchableOpacity, Platform, StatusBar, ActivityIndicator, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../design-system/tokens';
 import { mockNotifications } from '../../data/mockData';
+import {
+  fetchAllNotificationsApi,
+  markNotificationReadApi,
+  markAllNotificationsReadApi,
+  Notification,
+} from '../../services/notificationService';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
-type Notification = typeof mockNotifications[number];
 
 const TYPE_CONFIG: Record<string, { icon: IoniconName; bg: string; color: string }> = {
-  info:    { icon: 'information-circle-outline', bg: Colors.infoLight,    color: Colors.info },
-  success: { icon: 'checkmark-circle-outline',  bg: Colors.successLight, color: Colors.success },
-  warning: { icon: 'warning-outline',           bg: Colors.warningLight, color: Colors.warning },
-  danger:  { icon: 'alert-circle-outline',      bg: Colors.dangerLight,  color: Colors.danger },
+  info: { icon: 'information-circle-outline', bg: '#FFF1F2', color: '#EA0071' },
+  success: { icon: 'checkmark-circle-outline', bg: '#ECFDF5', color: '#009D88' },
+  warning: { icon: 'warning-outline', bg: '#F5F3FF', color: '#9530FE' },
+  danger: { icon: 'alert-circle-outline', bg: '#FFFBEB', color: '#FF7200' },
 };
 
-function NotifCard({ n, unread }: { n: Notification; unread: boolean }) {
+function NotifCard({ n, unread, onPress }: { n: any; unread: boolean; onPress?: () => void }) {
   const cfg = TYPE_CONFIG[n.type] ?? TYPE_CONFIG.info;
+  const CardWrapper = onPress ? TouchableOpacity : View;
+
+  // Format visual timestamp
+  let timeStr = n.time;
+  if (!timeStr && n.createdAt) {
+    const d = new Date(n.createdAt);
+    timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
   return (
-    <View style={[styles.card, unread && styles.cardUnread]}>
+    <CardWrapper
+      style={[styles.card, unread && styles.cardUnread]}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
       {unread && <View style={styles.unreadBar} />}
-      <View style={[styles.iconBox, { backgroundColor: IconBox.bg }]}>
-        <Ionicons name={cfg.icon} size={20} color={unread ? cfg.color : Colors.gray400} />
+      <View style={[styles.iconBox, { backgroundColor: cfg.bg }]}>
+        <Ionicons name={cfg.icon} size={20} color={cfg.color} />
       </View>
       <View style={styles.cardBody}>
         <View style={styles.cardTopRow}>
           <Text style={[styles.cardTitle, !unread && styles.cardTitleRead]} numberOfLines={1}>
             {n.title}
           </Text>
-          <Text style={styles.cardTime}>{n.time}</Text>
+          <Text style={styles.cardTime}>{timeStr}</Text>
         </View>
         <Text style={styles.cardMsg} numberOfLines={2}>{n.message}</Text>
       </View>
-    </View>
+    </CardWrapper>
   );
 }
 
@@ -50,13 +68,62 @@ function SectionLabel({ icon, label }: { icon: IoniconName; label: string }) {
 
 export default function NotificationsScreen() {
   const router = useRouter();
-  const [notifications, setNotifications] = useState(mockNotifications);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadNotifications = async (showIndicator = true) => {
+    if (showIndicator) setLoading(true);
+    try {
+      const res: any = await fetchAllNotificationsApi();
+      let list: any[] = [];
+      if (res) {
+        if (Array.isArray(res.data)) {
+          list = res.data;
+        } else if (res.data && Array.isArray(res.data.notifications)) {
+          list = res.data.notifications;
+        } else if (res.data && Array.isArray(res.data.items)) {
+          list = res.data.items;
+        } else if (Array.isArray(res.notifications)) {
+          list = res.notifications;
+        } else if (Array.isArray(res)) {
+          list = res;
+        }
+      }
+      setNotifications(list);
+    } catch (err) {
+      console.warn('Failed to fetch notifications from API:', err);
+      setNotifications([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadNotifications();
+  }, []);
 
   const unread = notifications.filter(n => !n.read);
-  const read   = notifications.filter(n =>  n.read);
+  const read = notifications.filter(n => n.read);
 
-  const markAllRead = () =>
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  const handleMarkAllRead = async () => {
+    try {
+      await markAllNotificationsReadApi();
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to mark all notifications as read.');
+    }
+  };
+
+  const handleMarkRead = async (id: string) => {
+    try {
+      await markNotificationReadApi(id);
+      setNotifications(prev =>
+        prev.map(n => ((n._id || n.id) === id ? { ...n, read: true } : n))
+      );
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to mark notification as read.');
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -68,7 +135,7 @@ export default function NotificationsScreen() {
           <Ionicons name="arrow-back" size={22} color={Colors.gray900} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Notifications</Text>
-        <TouchableOpacity onPress={markAllRead} disabled={unread.length === 0} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <TouchableOpacity onPress={handleMarkAllRead} disabled={unread.length === 0} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Text style={[styles.markAll, unread.length === 0 && styles.markAllDisabled]}>
             Mark all read
           </Text>
@@ -76,7 +143,7 @@ export default function NotificationsScreen() {
       </View>
 
       {/* Unread banner */}
-      {unread.length > 0 && (
+      {unread.length > 0 && !loading && (
         <View style={styles.banner}>
           <View style={styles.bannerDot} />
           <Text style={styles.bannerText}>
@@ -85,43 +152,63 @@ export default function NotificationsScreen() {
         </View>
       )}
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {unread.length === 0 && read.length === 0 && (
-          <View style={styles.empty}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="notifications-off-outline" size={36} color={Colors.gray300} />
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading notifications...</Text>
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {unread.length === 0 && read.length === 0 && (
+            <View style={styles.empty}>
+              <View style={styles.emptyIcon}>
+                <Ionicons name="notifications-off-outline" size={36} color={Colors.gray300} />
+              </View>
+              <Text style={styles.emptyTitle}>All caught up!</Text>
+              <Text style={styles.emptyMsg}>No notifications to show right now.</Text>
             </View>
-            <Text style={styles.emptyTitle}>All caught up!</Text>
-            <Text style={styles.emptyMsg}>No notifications to show right now.</Text>
-          </View>
-        )}
+          )}
 
-        {unread.length > 0 && (
-          <>
-            <SectionLabel icon="radio-button-on-outline" label={`New · ${unread.length}`} />
-            {unread.map(n => <NotifCard key={n.id} n={n} unread />)}
-          </>
-        )}
+          {unread.length > 0 && (
+            <>
+              <SectionLabel icon="radio-button-on-outline" label={`New · ${unread.length}`} />
+              {unread.map(n => (
+                <NotifCard
+                  key={n._id || n.id}
+                  n={n}
+                  unread
+                  onPress={() => handleMarkRead(n._id || n.id)}
+                />
+              ))}
+            </>
+          )}
 
-        {read.length > 0 && (
-          <View style={{ marginTop: unread.length > 0 ? Spacing[4] : 0 }}>
-            <SectionLabel icon="time-outline" label="Earlier" />
-            {read.map(n => <NotifCard key={n.id} n={n} unread={false} />)}
-          </View>
-        )}
+          {read.length > 0 && (
+            <View style={{ marginTop: unread.length > 0 ? Spacing[4] : 0 }}>
+              <SectionLabel icon="time-outline" label="Earlier" />
+              {read.map(n => (
+                <NotifCard
+                  key={n._id || n.id}
+                  n={n}
+                  unread={false}
+                />
+              ))}
+            </View>
+          )}
 
-        <View style={{ height: 100 }} />
-      </ScrollView>
+          <View style={{ height: 100 }} />
+        </ScrollView>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.white },
+  container: { flex: 1, backgroundColor: '#fafafa' },
 
   // Header
   header: {
@@ -219,7 +306,7 @@ const styles = StyleSheet.create({
   },
   iconBox: {
     width: IconBox.size, height: IconBox.size,
-    borderRadius: IconBox.radius,
+    borderRadius: 12,
     backgroundColor: IconBox.bg,
     alignItems: 'center',
     justifyContent: 'center',
@@ -256,7 +343,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // Empty state
+  // Empty/Loading
   empty: {
     alignItems: 'center',
     paddingTop: 80,
@@ -279,4 +366,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.sm,
     color: Colors.gray400,
   },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 120 },
+  loadingText: { fontSize: 13, color: Colors.gray500, marginTop: 10, fontWeight: '500' },
 });
