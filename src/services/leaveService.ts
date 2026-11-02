@@ -1,6 +1,6 @@
 import { getToken, getTenantId } from './authService';
 
-const BASE_URL = 'https://hrms-api.genmindz.in/api';
+const BASE_URL = 'https://workspace-api.genmindz.in/api';
 
 const ensureBaseUrl = () => {
   if (__DEV__ && BASE_URL.includes('your-api')) {
@@ -33,11 +33,9 @@ export interface ManualUpdatePayload {
 
 export interface ApplyLeavePayload {
   empId: string;
-  leaveId: string;
-  fromDate: string;
-  toDate: string;
   reason: string;
-  dailyBreakdown: { date: string; status: string }[];
+  process: boolean;
+  days: { date: string; type: string; leaveId: string }[];
 }
 
 export interface LeaveApplication {
@@ -83,7 +81,7 @@ export const submitAndProcessLeave = async (
 
 export const approveOrRejectLeave = async (
   payload: ApproveOrRejectPayload,
-): Promise<{ success: boolean; message: string }> => {
+): Promise<{ success: boolean; message: string; data?: any }> => {
   ensureBaseUrl();
   const token = await getToken();
   const tenantId = await getTenantId();
@@ -268,5 +266,46 @@ export const updateLeaveRequestStatus = async (
     throw new Error(data.message || 'Failed to update leave request status');
   }
   return data;
+};
+
+export interface LeaveTypeRecord {
+  _id: string;
+  leaveName: string;
+  yearlyCount?: number;
+  [key: string]: any;
+}
+
+export const fetchLeaveTypesApi = async (): Promise<any> => {
+  ensureBaseUrl();
+  const token = await getToken();
+  const tenantId = await getTenantId();
+  const res = await fetch(`${BASE_URL}/leaves`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-Tenant-Id': tenantId,
+    },
+  });
+  if (!res.ok) {
+    throw new Error('Failed to fetch leave types');
+  }
+  return res.json();
+};
+
+export const fetchEmployeeLeaveBalanceApi = async (employeeId: string): Promise<any> => {
+  ensureBaseUrl();
+  const token = await getToken();
+  const tenantId = await getTenantId();
+  const res = await fetch(`${BASE_URL}/leave-balance/${employeeId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-Tenant-Id': tenantId,
+    },
+  });
+  if (!res.ok) {
+    throw new Error('Failed to fetch employee leave balance');
+  }
+  return res.json();
 };
 

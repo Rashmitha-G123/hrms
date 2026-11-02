@@ -189,7 +189,7 @@ export default function LeadsScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   // Role & Admin Leads Stats State
-  const [userRole, setUserRole] = useState<'employee' | 'superadmin' | 'hr' | 'manager'>('employee');
+  const [userRole, setUserRole] = useState<'employee' | 'superadmin' | 'hr' | 'manager' | 'admin'>('employee');
   const [adminStats, setAdminStats] = useState<any>(null);
 
   // Filters & Search
@@ -228,7 +228,7 @@ export default function LeadsScreen() {
         if (profileData && profileData.user) {
           const role = profileData.user.role || 'employee';
           setUserRole(role);
-          if (role === 'superadmin' || role === 'hr' || role === 'manager') {
+          if (role === 'superadmin' || role === 'hr' || role === 'manager' || role === 'admin') {
             const statsRes = await fetchLeadStatisticsCounts().catch(() => null);
             if (statsRes && statsRes.success) {
               setAdminStats(statsRes.data);
@@ -245,7 +245,7 @@ export default function LeadsScreen() {
   const loadLeads = async (showIndicator = true) => {
     if (showIndicator) setLoading(true);
     try {
-      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager') {
+      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager' || userRole === 'admin') {
         const apiStatus = filter !== 'All' ? filter : undefined;
         const res = await fetchAllLeads({
           page: 1,
@@ -388,7 +388,7 @@ export default function LeadsScreen() {
         apiStatus = 'in_progress';
       }
 
-      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager') {
+      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager' || userRole === 'admin') {
         const payload = {
           status: followUpStatus.charAt(0).toUpperCase() + followUpStatus.slice(1).toLowerCase(),
           note: followUpNotes.trim() || 'Status updated by Admin'

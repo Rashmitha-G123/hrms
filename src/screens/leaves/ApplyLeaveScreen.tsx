@@ -1,4 +1,4 @@
-import React, { useState, useEffect} from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Platform, StatusBar, KeyboardAvoidingView, Dimensions, Alert,
@@ -9,7 +9,7 @@ import { Colors, Typography, Spacing, Radius } from '../../design-system/tokens'
 import { Input } from '../../design-system/components/Input';
 import { Button } from '../../design-system/components/Button';
 import { Card } from '../../design-system/components/Card';
-import { applyLeaveApi, fetchMyLeaveHistoryApi } from '../../services/leaveService';
+import { applyLeaveApi, fetchEmployeeLeaveBalanceApi } from '../../services/leaveService';
 import { fetchProfile } from '../../services/authService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -55,24 +55,30 @@ export default function ApplyLeaveScreen() {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [apiLeaveTypes, setApiLeaveTypes] = useState<any[]>([]);
+  const [dbLeaveTypes, setDbLeaveTypes] = useState<any[]>([]);
+  const [leaveBalances, setLeaveBalances] = useState<any[]>([]);
 
   useEffect(() => {
-    const loadLeaveBalances = async () => {
+    const loadLeaveBalancesAndTypes = async () => {
       try {
-        const res = await fetchMyLeaveHistoryApi();
-        if (res && Array.isArray(res.leaveTypes)) {
-          setApiLeaveTypes(res.leaveTypes);
+        const profile = await fetchProfile().catch(() => null);
+        const empId = profile?.user?.employeeId || profile?.user?.employmentDetails?.employeeId || 'EMP0014';
+        const res = await fetchEmployeeLeaveBalanceApi(empId).catch(() => null);
+        console.log('fetchEmployeeLeaveBalanceApi response:', JSON.stringify(res));
+
+        if (res && res.data && Array.isArray(res.data.leaveBalances)) {
+          setLeaveBalances(res.data.leaveBalances);
         }
       } catch (err) {
-        console.warn('Failed to load leave balance from API:', err);
+        console.warn('Failed to load leave balance data:', err);
       }
     };
-    loadLeaveBalances();
+    loadLeaveBalancesAndTypes();
   }, []);
 
-  const dynamicLeaveTypes = apiLeaveTypes.map((lt: any) => {
+  const leaveTypesList = leaveBalances.length > 0 ? leaveBalances.map((item: any) => {
     let iconName: IoniconName = 'sunny-outline';
-    const name = (lt.leaveName || '').toLowerCase();
+    const name = (item.leaveName || '').toLowerCase();
     if (name.includes('sick')) {
       iconName = 'medical-outline';
     } else if (name.includes('casual')) {
@@ -81,17 +87,15 @@ export default function ApplyLeaveScreen() {
       iconName = 'refresh-circle-outline';
     }
 
-    const remaining = lt.remaining !== undefined ? lt.remaining : (lt.allocated - lt.used);
+    const remaining = item.remaining !== undefined ? item.remaining : 0;
 
     return {
-      label: lt.leaveName || 'Annual Leave',
+      label: item.leaveName || 'Annual Leave',
       iconName,
       balance: isNaN(remaining) ? 0 : remaining,
-      id: lt.leaveTypeId || lt._id || lt.id || '60d0fe4f5311236168a109cc',
+      id: item.leaveId || item._id || '60d0fe4f5311236168a109cc',
     };
-  });
-
-  const leaveTypesList = dynamicLeaveTypes.length > 0 ? dynamicLeaveTypes : DEFAULT_LEAVE_TYPES;
+  }) : DEFAULT_LEAVE_TYPES;
 
   const start = new Date(fromDate);
   const end = new Date(toDate);
@@ -108,15 +112,32 @@ export default function ApplyLeaveScreen() {
     setLoading(true);
     try {
       const profile = await fetchProfile().catch(() => null);
-      const empId = profile?.user?.employeeId || 'EMP-001';
+      const customEmpId = profile?.user?.employeeId || profile?.user?.employmentDetails?.employeeId || 'EMP0014';
+
+      const leaveId = leaveTypesList[selectedType].id;
+      const daysArray = [];
+      try {
+        let current = new Date(fromDate);
+        const end = new Date(toDate);
+        let safetyCounter = 0;
+        while (current <= end && safetyCounter < 100) {
+          daysArray.push({
+            date: current.toISOString().split('T')[0],
+            type: 'leave',
+            leaveId: leaveId,
+          });
+          current.setDate(current.getDate() + 1);
+          safetyCounter++;
+        }
+      } catch (e) {
+        console.error('Failed to parse date range', e);
+      }
 
       const payload = {
-        empId,
-        leaveId: leaveTypesList[selectedType].id,
-        fromDate,
-        toDate,
+        empId: customEmpId,
         reason: reason.trim() || 'Personal work',
-        dailyBreakdown: getDailyBreakdown(fromDate, toDate)
+        process: false,
+        days: daysArray,
       };
 
       await applyLeaveApi(payload);
@@ -150,7 +171,16 @@ export default function ApplyLeaveScreen() {
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity 
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/(tabs)/leaves');
+            }
+          }} 
+          style={styles.backBtn}
+        >
           <Ionicons name="arrow-back" size={22} color={Colors.gray900} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Apply for Leave</Text>

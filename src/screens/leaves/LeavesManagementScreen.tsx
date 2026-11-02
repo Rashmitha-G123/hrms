@@ -10,13 +10,15 @@ import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../desi
 import { Badge } from '../../design-system/components/Badge';
 import { mockLeaves, mockEmployees } from '../../data/mockData';
 import {
-  submitAndProcessLeave,
+  applyLeaveApi,
   approveOrRejectLeave,
   manualUpdateBalance,
   fetchAllLeaveRequests,
   fetchLeaveStatisticsCounts,
   fetchHolidays,
   updateLeaveRequestStatus,
+  fetchLeaveTypesApi,
+  fetchEmployeeLeaveBalanceApi,
 } from '../../services/leaveService';
 import { fetchEmployees, fetchEmployeeById } from '../../services/employeeService';
 import { fetchProfile } from '../../services/authService';
@@ -53,6 +55,26 @@ const fmt = (d: string) => {
   }
 };
 
+const getDailyBreakdown = (from: string, to: string) => {
+  const dates = [];
+  try {
+    let current = new Date(from);
+    const end = new Date(to);
+    let safetyCounter = 0;
+    while (current <= end && safetyCounter < 100) {
+      dates.push({
+        date: current.toISOString().split('T')[0],
+        status: 'leave'
+      });
+      current.setDate(current.getDate() + 1);
+      safetyCounter++;
+    }
+  } catch (e) {
+    console.error('Failed to parse daily breakdown', e);
+  }
+  return dates;
+};
+
 const employeeColors: Record<string, { bg: string; text: string }> = {
   RS: { bg: '#EAF2FF', text: '#2B7FFF' },
   AM: { bg: '#E5FAEE', text: '#00C950' },
@@ -86,6 +108,8 @@ export default function LeavesManagementScreen() {
   const [directTo, setDirectTo] = useState(new Date().toISOString().split('T')[0]);
   const [directReason, setDirectReason] = useState('');
   const [directLoading, setDirectLoading] = useState(false);
+  const [dbLeaveTypes, setDbLeaveTypes] = useState<any[]>([]);
+  const [directLeaveBalances, setDirectLeaveBalances] = useState<any[]>([]);
 
   // 2. Balance Override Modal State
   const [showOverrideModal, setShowOverrideModal] = useState(false);
@@ -121,6 +145,33 @@ export default function LeavesManagementScreen() {
     }).catch(() => { });
   }, []);
 
+  useEffect(() => {
+    if (showDirectModal && directEmpId) {
+      console.log('Fetching leave balance for directEmpId:', directEmpId);
+      fetchEmployeeLeaveBalanceApi(directEmpId)
+        .then(res => {
+          if (res && res.data && Array.isArray(res.data.leaveBalances)) {
+            setDirectLeaveBalances(res.data.leaveBalances);
+          } else {
+            setDirectLeaveBalances([]);
+          }
+        })
+        .catch(err => {
+          console.warn('Failed to load leave balance for directEmpId:', err);
+          setDirectLeaveBalances([]);
+        });
+    }
+  }, [showDirectModal, directEmpId]);
+
+  useEffect(() => {
+    if (employees.length > 0) {
+      const firstEmp = employees[0];
+      const firstId = firstEmp.employeeId || firstEmp._id || firstEmp.id || '';
+      setDirectEmpId(firstId);
+      setOverrideEmpId(firstId);
+    }
+  }, [employees]);
+
   const normalizeLeaveRequest = (l: any) => {
     try {
       const start = new Date(l.startDate || l.from || Date.now());
@@ -147,6 +198,7 @@ export default function LeavesManagementScreen() {
         employeeId: l.employeeId || '',
         name,
         type: l.leaveName || l.type || 'Annual Leave',
+        leaveTypeId: l.leaveId || l.leaveTypeId || '',
         from: l.fromDate || l.from || new Date().toISOString(),
         to: l.toDate || l.to || new Date().toISOString(),
         days: l.numberOfDays || days,
@@ -177,6 +229,12 @@ export default function LeavesManagementScreen() {
       const statsRes = await fetchLeaveStatisticsCounts().catch(() => null);
       if (statsRes && statsRes.success) {
         setStatsCounts(statsRes.data);
+      }
+
+      const typesRes = await fetchLeaveTypesApi().catch(() => null);
+      if (typesRes) {
+        const typesList = Array.isArray(typesRes) ? typesRes : (typesRes.data || []);
+        setDbLeaveTypes(typesList);
       }
 
       const reqRes: any = await fetchAllLeaveRequests(1, 100);
@@ -265,8 +323,9 @@ export default function LeavesManagementScreen() {
   }, [activeTab, loadHolidaysData]);
   const derivedEmployees = employees.length > 0 ? employees.map(e => ({
     id: e.employeeId || e._id || e.id || '',
+    employeeId: e.employeeId || e._id || e.id || '',
     name: e.name || 'Unnamed Employee'
-  })) : mockEmployees;
+  })) : mockEmployees.map(m => ({ id: m.id, employeeId: m.id, name: m.name }));
 
   const filtered = leavesList.filter(l => {
     const matchStatus = statusFilter === 'all' || l.status === statusFilter;
@@ -299,9 +358,26 @@ export default function LeavesManagementScreen() {
     if (!selectedRequest) return;
     setActionLoading(true);
     try {
-      const apiStatus = status === 'approved' ? 'APPROVED' : 'REJECTED';
-      await updateLeaveRequestStatus(selectedRequest.id, apiStatus, adminRemarks);
-      Alert.alert('Success', `Leave request ${status} successfully.`);
+      const matchedType = dbLeaveTypes.find(t => t.leaveName === selectedRequest.type);
+      const leaveTypeId = selectedRequest.leaveTypeId || (matchedType ? matchedType._id : (LEAVE_IDS[selectedRequest.type] || '60d0fe4f5311236168a109cc'));
+
+      const res = await approveOrRejectLeave({
+        empId: selectedRequest.employeeId || '',
+        leaveId: leaveTypeId,
+        fromDate: selectedRequest.from,
+        toDate: selectedRequest.to,
+        status: status,
+      });
+      
+      if (status === 'approved' && res.data) {
+        Alert.alert(
+          'Approved Successfully', 
+          `Approved: ${res.data.approvedDays} day(s)\nLOP: ${res.data.lopDays} day(s)\nYearly Balance: ${res.data.yearlyBalance}`
+        );
+      } else {
+        Alert.alert('Success', res.message || `Leave request ${status} successfully.`);
+      }
+      
       // Update local state list
       setLeavesList(prev =>
         prev.map(l => l.id === selectedRequest.id ? { ...l, status } : l)
@@ -316,39 +392,79 @@ export default function LeavesManagementScreen() {
   };
 
   // ── Quick Inline Approve/Reject ──
-  const handleQuickAction = async (leaveId: string, status: 'approved' | 'rejected') => {
+  const handleQuickAction = async (leave: any, status: 'approved' | 'rejected') => {
     try {
-      const apiStatus = status === 'approved' ? 'APPROVED' : 'REJECTED';
-      await updateLeaveRequestStatus(leaveId, apiStatus, 'Admin action');
+      const matchedType = dbLeaveTypes.find(t => t.leaveName === leave.type);
+      const leaveTypeId = leave.leaveTypeId || (matchedType ? matchedType._id : (LEAVE_IDS[leave.type] || '60d0fe4f5311236168a109cc'));
+
+      const res = await approveOrRejectLeave({
+        empId: leave.employeeId || '',
+        leaveId: leaveTypeId,
+        fromDate: leave.from,
+        toDate: leave.to,
+        status: status,
+      });
+      
+      if (status === 'approved' && res.data) {
+        Alert.alert(
+          'Approved Successfully', 
+          `Approved: ${res.data.approvedDays} day(s)\nLOP: ${res.data.lopDays} day(s)\nYearly Balance: ${res.data.yearlyBalance}`
+        );
+      } else {
+        Alert.alert('Success', res.message || `Leave request ${status} successfully.`);
+      }
+
       setLeavesList(prev =>
-        prev.map(l => l.id === leaveId ? { ...l, status } : l)
+        prev.map(l => l.id === leave.id ? { ...l, status } : l)
       );
+      loadLeaveData().catch(() => { });
     } catch (err: any) {
       Alert.alert('Error', err.message || `Failed to update leave request.`);
     }
   };
 
-  // ── Handle Direct Submit and Auto-Approve ──
+  // ── Handle Direct Submit ──
   const handleDirectProcessSubmit = async () => {
     if (!directReason.trim()) {
-      Alert.alert('Error', 'Please enter a processing reason.');
+      Alert.alert('Error', 'Please enter a reason.');
       return;
     }
     setDirectLoading(true);
     try {
-      await submitAndProcessLeave({
+      const matchedBalance = directLeaveBalances.find(b => b.leaveName === directLeaveType);
+      const matchedType = dbLeaveTypes.find(t => t.leaveName === directLeaveType);
+      const leaveId = matchedBalance ? (matchedBalance.leaveId || matchedBalance._id) : (matchedType ? matchedType._id : (LEAVE_IDS[directLeaveType] || '60d0fe4f5311236168a109cc'));
+
+      const daysArray = [];
+      try {
+        let current = new Date(directFrom);
+        const end = new Date(directTo);
+        let safetyCounter = 0;
+        while (current <= end && safetyCounter < 100) {
+          daysArray.push({
+            date: current.toISOString().split('T')[0],
+            type: 'leave',
+            leaveId: leaveId,
+          });
+          current.setDate(current.getDate() + 1);
+          safetyCounter++;
+        }
+      } catch (e) {
+        console.error('Failed to parse date range', e);
+      }
+
+      await applyLeaveApi({
         empId: directEmpId,
-        leaveId: LEAVE_IDS[directLeaveType] || '60d0fe4f5311236168a109cc',
-        fromDate: new Date(directFrom).toISOString(),
-        toDate: new Date(directTo).toISOString(),
         reason: directReason.trim(),
+        process: false,
+        days: daysArray,
       });
-      Alert.alert('Success', 'Leave application processed and approved.');
+      Alert.alert('Success', 'Leave application submitted successfully.');
       setShowDirectModal(false);
       setDirectReason('');
       loadLeaveData();
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to process leave request.');
+      Alert.alert('Error', err.message || 'Failed to submit leave request.');
     } finally {
       setDirectLoading(false);
     }
@@ -364,9 +480,12 @@ export default function LeavesManagementScreen() {
     }
     setOverrideLoading(true);
     try {
+      const matchedType = dbLeaveTypes.find(t => t.leaveName === overrideLeaveType);
+      const leaveId = matchedType ? matchedType._id : (LEAVE_IDS[overrideLeaveType] || '60d0fe4f5311236168a109cc');
+
       await manualUpdateBalance({
         empId: overrideEmpId,
-        leaveId: LEAVE_IDS[overrideLeaveType] || '60d0fe4f5311236168a109cc',
+        leaveId,
         yearlyCount: yCount,
         carryForward: cForward,
       });
@@ -538,14 +657,14 @@ export default function LeavesManagementScreen() {
                               <>
                                 <TouchableOpacity
                                   style={s.approveIconBtn}
-                                  onPress={() => handleQuickAction(leave.id, 'approved')}
+                                  onPress={() => handleQuickAction(leave, 'approved')}
                                   activeOpacity={0.75}
                                 >
                                   <Ionicons name="checkmark" size={16} color="#10B981" />
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                   style={s.rejectIconBtn}
-                                  onPress={() => handleQuickAction(leave.id, 'rejected')}
+                                  onPress={() => handleQuickAction(leave, 'rejected')}
                                   activeOpacity={0.75}
                                 >
                                   <Ionicons name="close" size={16} color="#FF6900" />
@@ -654,14 +773,14 @@ export default function LeavesManagementScreen() {
                             <>
                               <TouchableOpacity
                                 style={s.approveIconBtn}
-                                onPress={() => handleQuickAction(leave.id, 'approved')}
+                                onPress={() => handleQuickAction(leave, 'approved')}
                                 activeOpacity={0.75}
                               >
                                 <Ionicons name="checkmark" size={16} color="#10B981" />
                               </TouchableOpacity>
                               <TouchableOpacity
                                 style={s.rejectIconBtn}
-                                onPress={() => handleQuickAction(leave.id, 'rejected')}
+                                onPress={() => handleQuickAction(leave, 'rejected')}
                                 activeOpacity={0.75}
                               >
                                 <Ionicons name="close" size={16} color="#FF6900" />
@@ -841,7 +960,7 @@ export default function LeavesManagementScreen() {
 
               <Text style={s.fieldLabel}>Leave Category *</Text>
               <View style={s.pickerContainer}>
-                {['Annual Leave', 'Sick Leave', 'Casual Leave'].map(t => (
+                {(directLeaveBalances.length > 0 ? directLeaveBalances.map(b => b.leaveName) : (dbLeaveTypes.length > 0 ? dbLeaveTypes.map(t => t.leaveName) : ['Annual Leave', 'Sick Leave', 'Casual Leave'])).map(t => (
                   <TouchableOpacity key={t} style={[s.pickerChip, directLeaveType === t && s.pickerChipActive]} onPress={() => setDirectLeaveType(t)}>
                     <Text style={[s.pickerChipText, directLeaveType === t && s.pickerChipTextActive]}>{t}</Text>
                   </TouchableOpacity>
@@ -853,6 +972,29 @@ export default function LeavesManagementScreen() {
 
               <Text style={s.fieldLabel}>To Date (YYYY-MM-DD) *</Text>
               <TextInput style={s.textInput} value={directTo} onChangeText={setDirectTo} placeholder="YYYY-MM-DD" placeholderTextColor="#A4A4AD" />
+
+              {/* Calculated Duration */}
+              {(() => {
+                try {
+                  const start = new Date(directFrom);
+                  const end = new Date(directTo);
+                  if (start.getTime() && end.getTime()) {
+                    const diffTime = Math.abs(end.getTime() - start.getTime());
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+                    if (!isNaN(diffDays)) {
+                      return (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 8, padding: 10, backgroundColor: '#F3F4F6', borderRadius: 8, gap: 6 }}>
+                          <Ionicons name="time-outline" size={16} color={Colors.primary} />
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.gray700 }}>
+                            Calculated Duration: {diffDays} Working Day{diffDays > 1 ? 's' : ''}
+                          </Text>
+                        </View>
+                      );
+                    }
+                  }
+                } catch (e) {}
+                return null;
+              })()}
 
               <Text style={s.fieldLabel}>Bypass Reason *</Text>
               <TextInput style={[s.textInput, { height: 70, paddingTop: 10 }]} multiline value={directReason} onChangeText={setDirectReason} placeholder="e.g. Direct management directive approval" placeholderTextColor="#A4A4AD" />
@@ -896,7 +1038,7 @@ export default function LeavesManagementScreen() {
 
               <Text style={s.fieldLabel}>Leave Category *</Text>
               <View style={s.pickerContainer}>
-                {['Annual Leave', 'Sick Leave', 'Casual Leave'].map(t => (
+                {(dbLeaveTypes.length > 0 ? dbLeaveTypes.map(t => t.leaveName) : ['Annual Leave', 'Sick Leave', 'Casual Leave']).map(t => (
                   <TouchableOpacity key={t} style={[s.pickerChip, overrideLeaveType === t && s.pickerChipActive]} onPress={() => setOverrideLeaveType(t)}>
                     <Text style={[s.pickerChipText, overrideLeaveType === t && s.pickerChipTextActive]}>{t}</Text>
                   </TouchableOpacity>

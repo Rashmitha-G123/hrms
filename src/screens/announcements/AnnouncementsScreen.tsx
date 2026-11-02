@@ -17,6 +17,7 @@ import {
   Announcement,
 } from '../../services/announcementService';
 import { fetchProfile } from '../../services/authService';
+import { fetchEmployeeById } from '../../services/employeeService';
 
 const FILTERS = ['All', 'Policy', 'Event', 'Holiday', 'Urgent', 'General'] as const;
 
@@ -102,7 +103,17 @@ function AnnouncementCard({ item, cardWidth, onDelete, onAcknowledge, onReact, c
   const topColor = TOP_BORDER[annPriority] ?? '#2563EB';
 
   const showDelete = userRole === 'admin' || userRole === 'superadmin';
-  const isAcknowledged = item.acknowledgedBy?.includes(currentUserId) || false;
+
+  console.log('[DEBUG] AnnouncementCard keys:', {
+    title: item.title,
+    keys: Object.keys(item),
+    json: JSON.stringify(item)
+  });
+
+  const isAcknowledged = (item.acknowledgments || item.acknowledgedBy || []).some((ack: any) => {
+    const targetId = typeof ack === 'object' && ack !== null ? (ack.user || ack._id || ack.id) : ack;
+    return targetId?.toString() === currentUserId?.toString();
+  }) || false;
 
   const reactions = item.reactions || [];
   const likeCount = reactions.filter((r: any) => r.type === 'like').length;
@@ -161,16 +172,20 @@ function AnnouncementCard({ item, cardWidth, onDelete, onAcknowledge, onReact, c
           <ReactionButton emoji="🚀" count={rocketCount} isActive={hasRocketed} onPress={() => onReact(annId, 'rocket')} />
         </View>
 
-        {isAcknowledged ? (
-          <View style={st.acknowledgedBadge}>
-            <Ionicons name="checkmark-circle" size={14} color="#137333" />
-            <Text style={st.acknowledgedText}>Read</Text>
-          </View>
-        ) : (
-          <TouchableOpacity style={st.acknowledgeBtn} onPress={() => onAcknowledge(annId)} activeOpacity={0.7}>
-            <Text style={st.acknowledgeBtnText}>Mark Read</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity 
+          style={[
+            st.ackBtnBase, 
+            isAcknowledged ? st.ackBtnDisabled : st.ackBtnActive
+          ]}
+          onPress={() => onAcknowledge(annId)}
+          disabled={isAcknowledged}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="checkmark-circle" size={14} color="#fff" />
+          <Text style={st.ackBtnText}>
+            {isAcknowledged ? 'Read' : 'Mark Read'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <View style={st.annDivider} />
@@ -214,6 +229,19 @@ export default function AnnouncementsScreen() {
   const [newPriority, setNewPriority] = useState<'Low' | 'Medium' | 'High' | 'Urgent'>('Medium');
   const [audienceType, setAudienceType] = useState<'All' | 'Department'>('All');
   const [audienceDept, setAudienceDept] = useState('');
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    type?: 'confirm' | 'alert';
+    onConfirm: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'confirm',
+    onConfirm: () => { },
+  });
 
   const H_PAD = 16;
   const isTablet = width >= 700;
@@ -230,14 +258,36 @@ export default function AnnouncementsScreen() {
   const loadAnnouncements = useCallback(async (showIndicator = true) => {
     if (showIndicator) setLoading(true);
     try {
-      // 1. Fetch Profile
+      // 1. Fetch Profile safely
       const profile = await fetchProfile().catch(() => null);
-      if (profile && profile.user) {
-        setUser(profile.user);
-        setUserRole(profile.user.role || 'employee');
+      let userObj: any = null;
+      if (profile) {
+        if (profile.user) {
+          userObj = profile.user;
+        } else {
+          userObj = profile;
+        }
       } else {
-        setUser({ _id: '60d0fe4f5311236168a109ca', name: 'Venil Mottana', role: 'employee' });
+        userObj = { _id: '6a3e2a281ef5da29b365256a', name: 'Yashwin Metromindz', role: 'employee' };
       }
+
+      // Fetch actual Employee details to resolve the correct Employee ID
+      if (userObj && userObj._id) {
+        try {
+          const empRes = await fetchEmployeeById(userObj._id);
+          if (empRes && empRes.success && empRes.employee) {
+            userObj = {
+              ...userObj,
+              employeeIdDirect: empRes.employee._id,
+              customEmployeeId: empRes.employee.employeeId,
+            };
+          }
+        } catch (e) {
+          console.warn('Failed to fetch employee details by ID:', e);
+        }
+      }
+      setUser(userObj);
+      setUserRole(userObj.role || 'employee');
 
       // 2. Fetch Announcements
       const res = await fetchAnnouncements();
@@ -267,30 +317,44 @@ export default function AnnouncementsScreen() {
       setAnnouncements(prev =>
         prev.map(ann => {
           if ((ann._id || ann.id) === id) {
-            const currentUserId = user?._id || '60d0fe4f5311236168a109ca';
-            const acknowledgedBy = ann.acknowledgedBy || [];
-            if (!acknowledgedBy.includes(currentUserId)) {
+            const currentUserId = user?._id || user?.id || '6a3e2a281ef5da29b365256a';
+            const acks = ann.acknowledgments || ann.acknowledgedBy || [];
+            const alreadyExists = acks.some((ack: any) => {
+              const targetId = typeof ack === 'object' && ack !== null ? (ack.user || ack._id || ack.id) : ack;
+              return targetId?.toString() === currentUserId?.toString();
+            });
+            if (!alreadyExists) {
               return {
                 ...ann,
-                acknowledgedBy: [...acknowledgedBy, currentUserId],
+                acknowledgments: [...acks, { user: currentUserId }],
               };
             }
           }
           return ann;
         })
       );
-      Alert.alert('Success', 'Announcement marked as read.');
+      setConfirmModal({
+        visible: true,
+        title: 'Success',
+        message: 'Announcement marked as read.',
+        type: 'alert',
+        onConfirm: () => { }
+      });
     } catch (err: any) {
       // Simulate local success on failure (offline/fallback)
       setAnnouncements(prev =>
         prev.map(ann => {
           if ((ann._id || ann.id) === id) {
-            const currentUserId = user?._id || '60d0fe4f5311236168a109ca';
-            const acknowledgedBy = ann.acknowledgedBy || [];
-            if (!acknowledgedBy.includes(currentUserId)) {
+            const currentUserId = user?._id || user?.id || '6a3e2a281ef5da29b365256a';
+            const acks = ann.acknowledgments || ann.acknowledgedBy || [];
+            const alreadyExists = acks.some((ack: any) => {
+              const targetId = typeof ack === 'object' && ack !== null ? (ack.user || ack._id || ack.id) : ack;
+              return targetId?.toString() === currentUserId?.toString();
+            });
+            if (!alreadyExists) {
               return {
                 ...ann,
-                acknowledgedBy: [...acknowledgedBy, currentUserId],
+                acknowledgments: [...acks, { user: currentUserId }],
               };
             }
           }
@@ -346,7 +410,13 @@ export default function AnnouncementsScreen() {
   // ── Submit Announcement ──
   const handleCreateAnnouncement = async () => {
     if (!newTitle.trim() || !newDesc.trim()) {
-      Alert.alert('Error', 'Please fill in Title and Description.');
+      setConfirmModal({
+        visible: true,
+        title: 'Error',
+        message: 'Please fill in Title and Description.',
+        type: 'alert',
+        onConfirm: () => { }
+      });
       return;
     }
 
@@ -364,7 +434,13 @@ export default function AnnouncementsScreen() {
       formData.append('targetAudience', JSON.stringify(audience));
 
       await createAnnouncement(formData);
-      Alert.alert('Success', 'Announcement created successfully.');
+      setConfirmModal({
+        visible: true,
+        title: 'Success',
+        message: 'Announcement created successfully.',
+        type: 'alert',
+        onConfirm: () => { }
+      });
       setShowAddModal(false);
 
       // Reset form
@@ -377,7 +453,13 @@ export default function AnnouncementsScreen() {
 
       loadAnnouncements(false);
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to create announcement.');
+      setConfirmModal({
+        visible: true,
+        title: 'Error',
+        message: err.message || 'Failed to create announcement.',
+        type: 'alert',
+        onConfirm: () => { }
+      });
     } finally {
       setFormLoading(false);
     }
@@ -385,28 +467,35 @@ export default function AnnouncementsScreen() {
 
   // ── Delete Announcement ──
   const handleDelete = (id: string) => {
-    Alert.alert(
-      'Delete Announcement',
-      'Are you sure you want to delete this announcement?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteAnnouncement(id);
-              Alert.alert('Success', 'Announcement deleted successfully.');
-              setAnnouncements(prev => prev.filter(a => (a._id || a.id) !== id));
-            } catch (err: any) {
-              // Local fallback deletion
-              setAnnouncements(prev => prev.filter(a => (a._id || a.id) !== id));
-              Alert.alert('Success', 'Announcement deleted successfully locally.');
-            }
-          }
+    setConfirmModal({
+      visible: true,
+      title: 'Delete Announcement',
+      message: 'Are you sure you want to delete this announcement?',
+      type: 'confirm',
+      onConfirm: async () => {
+        try {
+          await deleteAnnouncement(id);
+          setAnnouncements(prev => prev.filter(a => (a._id || a.id) !== id));
+          setConfirmModal({
+            visible: true,
+            title: 'Success',
+            message: 'Announcement deleted successfully.',
+            type: 'alert',
+            onConfirm: () => { }
+          });
+        } catch (err: any) {
+          // Local fallback deletion
+          setAnnouncements(prev => prev.filter(a => (a._id || a.id) !== id));
+          setConfirmModal({
+            visible: true,
+            title: 'Success',
+            message: 'Announcement deleted successfully locally.',
+            type: 'alert',
+            onConfirm: () => { }
+          });
         }
-      ]
-    );
+      }
+    });
   };
 
   // ── Filter announcements list ──
@@ -433,8 +522,13 @@ export default function AnnouncementsScreen() {
   }, [search, activeFilter, announcements]);
 
   const highPriority = announcements.filter(a => a.priority === 'High' || a.priority === 'Urgent').length;
-  const currentUserId = user?._id || '60d0fe4f5311236168a109ca';
-  const readAnnouncementsCount = announcements.filter(a => a.acknowledgedBy?.includes(currentUserId)).length;
+  const currentUserId = user?._id || user?.id || '6a3e2a281ef5da29b365256a';
+  const readAnnouncementsCount = announcements.filter(a =>
+    (a.acknowledgments || a.acknowledgedBy || []).some((ack: any) => {
+      const targetId = typeof ack === 'object' && ack !== null ? (ack.user || ack._id || ack.id) : ack;
+      return targetId?.toString() === currentUserId?.toString();
+    })
+  ).length;
 
   const now = new Date();
   const thisMonthCount = announcements.filter(a => {
@@ -613,6 +707,29 @@ export default function AnnouncementsScreen() {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      {/* Custom Confirmation/Alert Modal */}
+      <Modal visible={confirmModal.visible} transparent animationType="fade" onRequestClose={() => setConfirmModal(prev => ({ ...prev, visible: false }))}>
+        <View style={st.confirmOverlay}>
+          <View style={st.confirmBox}>
+            <Text style={st.confirmTitle}>{confirmModal.title}</Text>
+            <Text style={st.confirmMessage}>{confirmModal.message}</Text>
+            <View style={st.confirmActions}>
+              {confirmModal.type !== 'alert' && (
+                <TouchableOpacity style={st.confirmCancelBtn} onPress={() => setConfirmModal(prev => ({ ...prev, visible: false }))}>
+                  <Text style={st.confirmCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={[st.confirmSubmitBtn, confirmModal.type === 'alert' && { backgroundColor: Colors.primary }]} onPress={() => {
+                setConfirmModal(prev => ({ ...prev, visible: false }));
+                confirmModal.onConfirm();
+              }}>
+                <Text style={st.confirmSubmitText}>{confirmModal.type === 'alert' ? 'OK' : 'Confirm'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -666,10 +783,10 @@ const st = StyleSheet.create({
   reactionCount: { fontSize: 11, color: '#6B7280', marginLeft: 4, fontWeight: '600' },
   reactionCountActive: { color: '#2563EB' },
 
-  acknowledgeBtn: { backgroundColor: '#2563EB', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  acknowledgeBtnText: { fontSize: 11, color: '#fff', fontWeight: '700' },
-  acknowledgedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: '#E6F4EA' },
-  acknowledgedText: { fontSize: 11, color: '#137333', fontWeight: '700' },
+  ackBtnBase: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, marginLeft: 'auto', ...(Platform.OS === 'web' ? { boxShadow: '0px 2px 10px rgba(0,0,0,0.1)' } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 3 }) },
+  ackBtnActive: { backgroundColor: Colors.primary || '#2563EB' },
+  ackBtnDisabled: { backgroundColor: '#10B981' },
+  ackBtnText: { fontSize: 11, color: '#fff', fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
 
   emptyState: { alignItems: 'center', paddingVertical: 64, width: '100%' },
   emptyText: { fontSize: 14, color: '#9CA3AF', marginTop: 12, fontWeight: '500' },
@@ -698,4 +815,15 @@ const st = StyleSheet.create({
   modalCancelTxt: { fontSize: 14, fontWeight: '700', color: Colors.gray600 },
   modalSubmitBtn: { flex: 2, height: 48, borderRadius: 12, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
   modalSubmitTxt: { fontSize: 14, fontWeight: '700', color: '#fff' },
+
+  // Confirmation Modal
+  confirmOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  confirmBox: { backgroundColor: '#fff', borderRadius: 16, padding: 20, width: '100%', maxWidth: 340, ...Shadow.md },
+  confirmTitle: { fontSize: 16, fontWeight: '700', color: Colors.gray900, marginBottom: 8 },
+  confirmMessage: { fontSize: 13, color: Colors.gray600, lineHeight: 18, marginBottom: 20 },
+  confirmActions: { flexDirection: 'row', gap: 10, justifyContent: 'flex-end' },
+  confirmCancelBtn: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, borderWidth: 1, borderColor: '#E4E4E7' },
+  confirmCancelText: { fontSize: 13, color: Colors.gray600, fontWeight: '600' },
+  confirmSubmitBtn: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, backgroundColor: Colors.danger },
+  confirmSubmitText: { fontSize: 13, color: '#fff', fontWeight: '600' },
 });

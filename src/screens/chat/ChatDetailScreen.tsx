@@ -2,23 +2,23 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput,
   TouchableOpacity, Platform, StatusBar, KeyboardAvoidingView,
-  Animated, Easing, ActivityIndicator, Alert, Modal, RefreshControl
+  Animated, Easing, ActivityIndicator, Alert, Modal, RefreshControl, Linking
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../design-system/tokens';
 import { mockChats, currentUser } from '../../data/mockData';
 import {
+  fetchConversations,
   fetchMessages,
   sendMessage,
   reactToMessage,
   deleteMessage,
   clearConversationHistory,
   markConversationAsRead,
-  fetchConversationMessages,
-  sendMessageAdmin,
 } from '../../services/chatService';
 import { fetchProfile } from '../../services/authService';
+import * as ImagePicker from 'expo-image-picker';
 
 const PRIMARY = '#3B82F6';
 const PRIMARY_LIGHT = '#EFF6FF';
@@ -29,7 +29,7 @@ type Message = {
   mine: boolean;
   time: string;
   status?: 'sent' | 'delivered' | 'read';
-  attachment?: { name: string; size: string };
+  attachment?: { name: string; size: string; url?: string };
   senderName?: string;
   reactions?: { user: string; emoji: string }[];
 };
@@ -151,14 +151,28 @@ function MessageBubble({ item, prevMine, onLongPress }: MessageBubbleProps) {
         ]}
       >
         {item.attachment && (
-          <View style={[styles.attachCard, item.mine && styles.attachCardMine]}>
+          <TouchableOpacity 
+            activeOpacity={0.8}
+            onPress={async () => {
+              if (item.attachment?.url) {
+                const u = item.attachment.url;
+                const absoluteUrl = u.startsWith('http') ? u : `https://hrms-api.genmindz.in${u}`;
+                try {
+                  await Linking.openURL(absoluteUrl);
+                } catch (e) {
+                  console.warn('Failed to download document:', e);
+                }
+              }
+            }}
+            style={[styles.attachCard, item.mine && styles.attachCardMine]}
+          >
             <Ionicons name="document-attach-outline" size={20} color={item.mine ? 'rgba(255,255,255,0.9)' : PRIMARY} />
             <View style={{ flex: 1 }}>
               <Text style={[styles.attachName, item.mine && { color: '#fff' }]} numberOfLines={1}>{item.attachment.name}</Text>
               <Text style={[styles.attachSize, item.mine && { color: 'rgba(255,255,255,0.7)' }]}>{item.attachment.size}</Text>
             </View>
             <Ionicons name="download-outline" size={16} color={item.mine ? 'rgba(255,255,255,0.8)' : Colors.gray500} />
-          </View>
+          </TouchableOpacity>
         )}
 
         {!item.mine && showTail && item.senderName && (
@@ -212,13 +226,23 @@ const normalizeMessage = (item: any, currentUserId: string = currentUser.employe
     }
   }
 
+  let attachment = item.attachment || undefined;
+  if (!attachment && Array.isArray(item.attachments) && item.attachments.length > 0) {
+    const att = item.attachments[0];
+    attachment = {
+      name: att.name || 'Attachment',
+      size: att.type ? att.type.split('/').pop()?.toUpperCase() || 'Document' : 'Document',
+      url: att.url || '',
+    };
+  }
+
   return {
     id: item._id || item.id || '',
     text: item.text || '',
     mine,
     time: time || item.time || '',
     status: item.status || 'read',
-    attachment: item.attachment || undefined,
+    attachment,
     senderName: item.sender && typeof item.sender === 'object' ? item.sender.name : (item.senderName || ''),
     reactions: Array.isArray(item.reactions) ? item.reactions : [],
   };
@@ -236,11 +260,24 @@ export default function ChatDetailScreen() {
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
   const [myUserId, setMyUserId] = useState<string>(currentUser.employeeId);
-  const [userRole, setUserRole] = useState<'employee' | 'superadmin' | 'hr' | 'manager'>('employee');
+  const [userRole, setUserRole] = useState<'employee' | 'superadmin' | 'hr' | 'manager' | 'admin'>('employee');
 
   // Options menus states
   const [showActions, setShowActions] = useState(false);
   const [longPressedMessage, setLongPressedMessage] = useState<Message | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    type?: 'confirm' | 'alert';
+    onConfirm: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'confirm',
+    onConfirm: () => {},
+  });
 
   const listRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
@@ -268,23 +305,31 @@ export default function ChatDetailScreen() {
         console.warn('Could not fetch user profile for chat ID, using fallback:', e);
       }
 
-      let res;
-      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager') {
-        res = await fetchConversationMessages(id);
-      } else {
-        res = await fetchMessages(id);
-      }
-
+      const res = await fetchMessages(id);
       let list: any[] = [];
       if (res && res.success && Array.isArray(res.messages)) {
         list = res.messages;
-      } else if (res && res.success && Array.isArray(res.data)) {
-        list = res.data;
       } else if (Array.isArray(res)) {
         list = res;
-      } else if (res && Array.isArray(res.data)) {
+      } else if (res && res.success && Array.isArray(res.data)) {
         list = res.data;
+      } else if (res && res.success && res.conversation && Array.isArray(res.conversation.messages)) {
+        list = res.conversation.messages;
+      } else if (res && res.messages) {
+         list = res.messages; // fallback
       }
+      
+      // Also fallback to fetchConversations if somehow fetchMessages is empty, though it shouldn't be
+      if (list.length === 0) {
+        const convRes = await fetchConversations();
+        if (convRes && convRes.success && Array.isArray(convRes.conversations)) {
+          const conversation = convRes.conversations.find((c: any) => c._id === id || c.id === id);
+          if (conversation && Array.isArray(conversation.messages)) {
+            list = conversation.messages;
+          }
+        }
+      }
+      
       setMessages(list.map(m => normalizeMessage(m, selfId)));
     } catch (err) {
       console.warn('Failed to load messages from API:', err);
@@ -334,22 +379,20 @@ export default function ChatDetailScreen() {
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
-      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager') {
-        const payload = {
-          chatId: id,
-          content: currentText
-        };
-        await sendMessageAdmin(payload);
-      } else {
-        const formData = new FormData();
-        formData.append('conversationId', id);
-        formData.append('text', currentText);
-        await sendMessage(formData);
-      }
+      const formData = new FormData();
+      formData.append('conversationId', id);
+      formData.append('text', currentText);
+      await sendMessage(formData);
       // Reload messages list
       loadMessages(false);
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to send message.');
+      setConfirmModal({
+        visible: true,
+        title: 'Error',
+        message: err.message || 'Failed to send message.',
+        type: 'alert',
+        onConfirm: () => {}
+      });
       setMessages(prev => prev.filter(m => m.id !== tempId));
     }
   };
@@ -357,26 +400,33 @@ export default function ChatDetailScreen() {
   // ── Clear Conversation History ──
   const handleClearHistory = () => {
     setShowActions(false);
-    Alert.alert(
-      'Clear Conversation',
-      'Are you sure you want to delete all messages in this chat? This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear Chat',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await clearConversationHistory(id);
-              setMessages([]);
-              Alert.alert('Success', 'Conversation history cleared.');
-            } catch (err: any) {
-              Alert.alert('Error', err.message || 'Failed to clear conversation history.');
-            }
-          }
+    setConfirmModal({
+      visible: true,
+      title: 'Clear Conversation',
+      message: 'Are you sure you want to delete all messages in this chat? This cannot be undone.',
+      type: 'confirm',
+      onConfirm: async () => {
+        try {
+          await clearConversationHistory(id);
+          setMessages([]);
+          setConfirmModal({
+            visible: true,
+            title: 'Success',
+            message: 'Conversation history cleared.',
+            type: 'alert',
+            onConfirm: () => {}
+          });
+        } catch (err: any) {
+          setConfirmModal({
+            visible: true,
+            title: 'Error',
+            message: err.message || 'Failed to clear conversation history.',
+            type: 'alert',
+            onConfirm: () => {}
+          });
         }
-      ]
-    );
+      }
+    });
   };
 
   // ── React to Message ──
@@ -391,10 +441,22 @@ export default function ChatDetailScreen() {
           prev.map(m => m.id === msgId ? { ...m, reactions: res.reactions } : m)
         );
       } else {
-        Alert.alert('Error', 'Failed to add reaction.');
+        setConfirmModal({
+          visible: true,
+          title: 'Error',
+          message: 'Failed to add reaction.',
+          type: 'alert',
+          onConfirm: () => {}
+        });
       }
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to add reaction.');
+      setConfirmModal({
+        visible: true,
+        title: 'Error',
+        message: err.message || 'Failed to add reaction.',
+        type: 'alert',
+        onConfirm: () => {}
+      });
     }
   };
 
@@ -403,26 +465,83 @@ export default function ChatDetailScreen() {
     if (!longPressedMessage) return;
     const msgId = longPressedMessage.id;
     setLongPressedMessage(null);
-    Alert.alert(
-      'Delete Message',
-      'Are you sure you want to delete this message?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteMessage(msgId);
-              setMessages(prev => prev.filter(m => m.id !== msgId));
-            } catch (err: any) {
-              setMessages(prev => prev.filter(m => m.id !== msgId));
-              Alert.alert('Success', 'Message deleted locally.');
-            }
-          }
+    setConfirmModal({
+      visible: true,
+      title: 'Delete Message',
+      message: 'Are you sure you want to delete this message?',
+      type: 'confirm',
+      onConfirm: async () => {
+        try {
+          await deleteMessage(msgId);
+          setMessages(prev => prev.filter(m => m.id !== msgId));
+        } catch (err: any) {
+          setMessages(prev => prev.filter(m => m.id !== msgId));
+          setConfirmModal({
+            visible: true,
+            title: 'Success',
+            message: 'Message deleted locally.',
+            type: 'alert',
+            onConfirm: () => {}
+          });
         }
-      ]
-    );
+      }
+    });
+  };
+
+  // ── Upload File Helpers ──
+  const performFileUpload = async (fileObj: any) => {
+    setLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('conversationId', id);
+      formData.append('documents', fileObj);
+      formData.append('text', `Sent an attachment: ${fileObj.name || 'file'}`);
+
+      await sendMessage(formData);
+      loadMessages(false);
+    } catch (err: any) {
+      setConfirmModal({
+        visible: true,
+        title: 'Error',
+        message: err.message || 'Failed to upload file.',
+        type: 'alert',
+        onConfirm: () => {}
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUploadFile = async () => {
+    if (Platform.OS === 'web') {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.onchange = async (e: any) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        await performFileUpload(file);
+      };
+      input.click();
+    } else {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        allowsEditing: false,
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const uri = asset.uri;
+        const name = uri.substring(uri.lastIndexOf('/') + 1) || 'upload.jpg';
+        const type = asset.mimeType || 'image/jpeg';
+        
+        await performFileUpload({
+          uri,
+          name,
+          type,
+        });
+      }
+    }
   };
 
   const isOnline = !chat.isGroup && (chat as any).online;
@@ -434,7 +553,16 @@ export default function ChatDetailScreen() {
 
       {/* Sticky Header */}
       <Animated.View style={[styles.header, { opacity: headerOpacity, transform: [{ scale: headerScale }] }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/(tabs)/chat');
+            }
+          }}
+          style={styles.backBtn}
+        >
           <Ionicons name="arrow-back" size={22} color="#1E293B" />
         </TouchableOpacity>
 
@@ -458,12 +586,12 @@ export default function ChatDetailScreen() {
         </View>
 
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerIconBtn}>
+          {/* <TouchableOpacity style={styles.headerIconBtn}>
             <Ionicons name="call-outline" size={18} color={Colors.gray600} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerIconBtn}>
             <Ionicons name="videocam-outline" size={18} color={Colors.gray600} />
-          </TouchableOpacity>
+          </TouchableOpacity> */}
           <TouchableOpacity style={styles.headerIconBtn} onPress={() => setShowActions(!showActions)}>
             <Ionicons name="ellipsis-vertical" size={18} color={Colors.gray600} />
           </TouchableOpacity>
@@ -471,7 +599,7 @@ export default function ChatDetailScreen() {
 
         {showActions && (
           <View style={styles.actionMenu}>
-            {['View Profile', 'Search in Chat', 'Clear Chat'].map((label, i) => (
+            {['Clear Chat'].map((label, i) => (
               <TouchableOpacity
                 key={i}
                 style={[styles.actionMenuItem, i < 2 && { borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }]}
@@ -515,8 +643,8 @@ export default function ChatDetailScreen() {
 
       {/* Composer */}
       <View style={styles.composer}>
-        <TouchableOpacity style={styles.composerBtn}>
-          <Ionicons name="add-circle-outline" size={24} color={'#A4A4AD'} />
+        <TouchableOpacity style={styles.composerBtn} onPress={handleUploadFile}>
+          <Ionicons name="link-outline" size={24} color={'#A4A4AD'} />
         </TouchableOpacity>
         <View style={styles.composerInputWrap}>
           <TextInput
@@ -529,19 +657,14 @@ export default function ChatDetailScreen() {
             multiline
             returnKeyType="default"
           />
-          <TouchableOpacity style={styles.emojiBtn}>
-            <Ionicons name="happy-outline" size={20} color={'#A4A4AD'} />
-          </TouchableOpacity>
         </View>
-        {input.trim().length > 0 ? (
-          <TouchableOpacity style={styles.sendBtn} onPress={send}>
-            <Ionicons name="send" size={18} color="#fff" />
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={styles.composerBtn}>
-            <Ionicons name="mic-outline" size={22} color={'#A4A4AD'} />
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity 
+          style={[styles.sendBtn, !input.trim() && { backgroundColor: '#CBD5E1' }]} 
+          onPress={send}
+          disabled={!input.trim()}
+        >
+          <Ionicons name="send" size={18} color="#fff" />
+        </TouchableOpacity>
       </View>
 
       {/* ── Modal 4: Message Long Press Context Modal ── */}
@@ -571,6 +694,29 @@ export default function ChatDetailScreen() {
               <Ionicons name="close-circle-outline" size={16} color={Colors.gray600} />
               <Text style={styles.contextActionText}>Cancel</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Custom Confirmation/Alert Modal */}
+      <Modal visible={confirmModal.visible} transparent animationType="fade" onRequestClose={() => setConfirmModal(prev => ({ ...prev, visible: false }))}>
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmBox}>
+            <Text style={styles.confirmTitle}>{confirmModal.title}</Text>
+            <Text style={styles.confirmMessage}>{confirmModal.message}</Text>
+            <View style={styles.confirmActions}>
+              {confirmModal.type !== 'alert' && (
+                <TouchableOpacity style={styles.confirmCancelBtn} onPress={() => setConfirmModal(prev => ({ ...prev, visible: false }))}>
+                  <Text style={styles.confirmCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={[styles.confirmSubmitBtn, confirmModal.type === 'alert' && { backgroundColor: PRIMARY }]} onPress={() => {
+                setConfirmModal(prev => ({ ...prev, visible: false }));
+                confirmModal.onConfirm();
+              }}>
+                <Text style={styles.confirmSubmitText}>{confirmModal.type === 'alert' ? 'OK' : 'Confirm'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -691,4 +837,15 @@ const styles = StyleSheet.create({
   reactionBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 999, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: '#E2E8F0' },
   reactionEmoji: { fontSize: 12 },
   reactionCount: { fontSize: 9, color: Colors.gray600, fontWeight: '700', marginLeft: 2 },
+
+  // Confirmation Modal
+  confirmOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  confirmBox: { backgroundColor: '#fff', borderRadius: 16, padding: 20, width: '100%', maxWidth: 340, ...Shadow.md },
+  confirmTitle: { fontSize: 16, fontWeight: '700', color: Colors.gray900, marginBottom: 8 },
+  confirmMessage: { fontSize: 13, color: Colors.gray600, lineHeight: 18, marginBottom: 20 },
+  confirmActions: { flexDirection: 'row', gap: 10, justifyContent: 'flex-end' },
+  confirmCancelBtn: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, borderWidth: 1, borderColor: Colors.gray200 },
+  confirmCancelText: { fontSize: 13, color: Colors.gray600, fontWeight: '600' },
+  confirmSubmitBtn: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, backgroundColor: Colors.danger },
+  confirmSubmitText: { fontSize: 13, color: '#fff', fontWeight: '600' },
 });

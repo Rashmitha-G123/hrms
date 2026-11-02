@@ -1,6 +1,6 @@
 import { getToken, getTenantId } from './authService';
 
-const BASE_URL = 'https://hrms-api.genmindz.in/api';
+const BASE_URL = 'https://workspace-api.genmindz.in/api';
 
 const ensureBaseUrl = () => {
   if (__DEV__ && BASE_URL.includes('your-api')) {

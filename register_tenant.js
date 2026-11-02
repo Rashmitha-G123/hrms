@@ -1,4 +1,4 @@
-const BASE_URL = 'https://hrms-api.genmindz.in/api';
+const BASE_URL = 'https://workspace-api.genmindz.in/api';
 
 async function register() {
   console.log('Sending registration request for tenant: company...');

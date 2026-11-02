@@ -1,6 +1,6 @@
 import { getToken, getTenantId } from './authService';
 
-const BASE_URL = 'https://hrms-api.genmindz.in/api';
+const BASE_URL = 'https://workspace-api.genmindz.in/api';
 
 const ensureBaseUrl = () => {
   if (__DEV__ && BASE_URL.includes('your-api')) {
@@ -175,6 +175,23 @@ export const fetchEmployeeById = async (id: string): Promise<{ success: boolean;
   });
   if (!res.ok) {
     throw new Error('Failed to fetch employee details');
+  }
+  return res.json();
+};
+
+export const fetchEmployeesSelectionApi = async (page: number = 1, limit: number = 100): Promise<{ success: boolean; employees: Employee[] }> => {
+  ensureBaseUrl();
+  const token = await getToken();
+  const tenantId = await getTenantId();
+  const res = await fetch(`${BASE_URL}/hr/employees-selection?page=${page}&limit=${limit}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-Tenant-Id': tenantId,
+    },
+  });
+  if (!res.ok) {
+    throw new Error('Failed to fetch employees selection');
   }
   return res.json();
 };

@@ -8,11 +8,41 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../design-system/tokens';
 import { mockNotifications } from '../../data/mockData';
 import {
-  fetchAllNotificationsApi,
+  fetchRecentNotificationsApi,
   markNotificationReadApi,
   markAllNotificationsReadApi,
   Notification,
 } from '../../services/notificationService';
+import { fetchProfile } from '../../services/authService';
+
+const isNotificationRead = (n: any, currentUserId?: string) => {
+  const readList = n.readBy || n.readUsers || n.read_by || n.read || [];
+  const isReadArray = Array.isArray(readList) && (n.readBy || n.readUsers || n.read_by || Array.isArray(n.read));
+
+  if (!currentUserId) {
+    if (isReadArray) return false;
+    return !!n.read || !!n.isRead;
+  }
+  
+  if (n.isRead === true || n.read === true) return true;
+  
+  if (Array.isArray(readList) && readList.length > 0) {
+    return readList.some((u: any) => {
+      let targetId = u;
+      if (typeof u === 'object' && u !== null) {
+        if (u.user && typeof u.user === 'object') {
+          targetId = u.user._id || u.user.id;
+        } else if (u.userId && typeof u.userId === 'object') {
+          targetId = u.userId._id || u.userId.id;
+        } else {
+          targetId = u.user || u.userId || u._id || u.id;
+        }
+      }
+      return targetId?.toString() === currentUserId?.toString();
+    });
+  }
+  return false;
+};
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -70,23 +100,37 @@ export default function NotificationsScreen() {
   const router = useRouter();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<any>(null);
 
   const loadNotifications = async (showIndicator = true) => {
     if (showIndicator) setLoading(true);
+
     try {
-      const res: any = await fetchAllNotificationsApi();
+      const pData = await fetchProfile();
+      let extractedUser = null;
+      if (pData) {
+        if (pData.user) extractedUser = pData.user;
+        else if (pData.data && pData.data.user) extractedUser = pData.data.user;
+        else if (pData.data) extractedUser = pData.data;
+        else extractedUser = pData;
+      }
+      setUser(extractedUser);
+    } catch (err) {
+      console.warn('Failed to fetch profile in notifications:', err);
+    }
+
+    try {
+      const res: any = await fetchRecentNotificationsApi();
       let list: any[] = [];
       if (res) {
-        if (Array.isArray(res.data)) {
-          list = res.data;
-        } else if (res.data && Array.isArray(res.data.notifications)) {
-          list = res.data.notifications;
-        } else if (res.data && Array.isArray(res.data.items)) {
-          list = res.data.items;
-        } else if (Array.isArray(res.notifications)) {
+        if (Array.isArray(res.notifications)) {
           list = res.notifications;
+        } else if (Array.isArray(res.data)) {
+          list = res.data;
+        } else if (res.data && Array.isArray((res.data as any).notifications)) {
+          list = (res.data as any).notifications;
         } else if (Array.isArray(res)) {
-          list = res;
+          list = res as any;
         }
       }
       setNotifications(list);
@@ -102,13 +146,18 @@ export default function NotificationsScreen() {
     loadNotifications();
   }, []);
 
-  const unread = notifications.filter(n => !n.read);
-  const read = notifications.filter(n => n.read);
+  const currentUserId = user?._id || user?.id || user?.userId;
+  const unread = notifications.filter(n => !isNotificationRead(n, currentUserId));
+  const read = notifications.filter(n => isNotificationRead(n, currentUserId));
 
   const handleMarkAllRead = async () => {
     try {
       await markAllNotificationsReadApi();
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      setNotifications(prev => prev.map(n => {
+        if (Array.isArray(n.readBy)) return { ...n, readBy: [...n.readBy, currentUserId] };
+        if (Array.isArray(n.read)) return { ...n, read: [...n.read, { user: currentUserId }] };
+        return { ...n, read: true, isRead: true };
+      }));
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to mark all notifications as read.');
     }
@@ -118,7 +167,14 @@ export default function NotificationsScreen() {
     try {
       await markNotificationReadApi(id);
       setNotifications(prev =>
-        prev.map(n => ((n._id || n.id) === id ? { ...n, read: true } : n))
+        prev.map(n => {
+          if ((n._id || n.id) === id) {
+            if (Array.isArray(n.readBy)) return { ...n, readBy: [...n.readBy, currentUserId] };
+            if (Array.isArray(n.read)) return { ...n, read: [...n.read, { user: currentUserId }] };
+            return { ...n, read: true, isRead: true };
+          }
+          return n;
+        })
       );
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to mark notification as read.');
@@ -369,3 +425,4 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 120 },
   loadingText: { fontSize: 13, color: Colors.gray500, marginTop: 10, fontWeight: '500' },
 });
+

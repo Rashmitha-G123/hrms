@@ -96,8 +96,8 @@ export default function WelcomeScreen() {
             <Text style={styles.badgeText}>{'Enterprise HR Platform'}</Text>
           </View>
 
-          <View style={[styles.glassCard, S.lg, isSmall && { width: 66, height: 66, borderRadius: 20 }]}>
-            <Image source={require('../../../assets/logo.png')} style={[styles.logo, isSmall && { width: 44, height: 44 }]} resizeMode="contain" />
+          <View style={[styles.glassCard, S.lg, isSmall && { width: 110, height: 48, borderRadius: 10 }]}>
+            <Image source={require('../../../assets/logo.png')} style={styles.logo} resizeMode="contain" />
           </View>
 
           <Text style={[styles.heroTitle, { fontSize: heroTitle }]}>{'MetroMindz HRMS'}</Text>
@@ -147,12 +147,12 @@ const styles = StyleSheet.create({
   badgeText:{ fontSize: 11, fontWeight: '600', color: '#fff', letterSpacing: 0.4 },
 
   glassCard: {
-    width: 80, height: 80, borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)',
+    width: 144, height: 58, borderRadius: 12,
+    backgroundColor: '#fff',
     alignItems: 'center', justifyContent: 'center', marginBottom: 16,
+    paddingHorizontal: 12, paddingVertical: 8,
   },
-  logo: { width: 54, height: 54 },
+  logo: { width: '100%', height: '100%' },
 
   heroTitle:    { fontWeight: '700', color: '#fff', textAlign: 'center', letterSpacing: -0.5, marginBottom: 6 },
   heroSubtitle: { fontSize: 14, fontWeight: '500', color: 'rgba(255,255,255,0.85)', textAlign: 'center', marginBottom: 8 },

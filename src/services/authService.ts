@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
 // TODO: replace with your actual base URL
-const BASE_URL = 'https://hrms-api.genmindz.in/api';
+const BASE_URL = 'https://workspace-api.genmindz.in/api';
 
 const ensureBaseUrl = () => {
   if (__DEV__ && BASE_URL.includes('your-api')) {

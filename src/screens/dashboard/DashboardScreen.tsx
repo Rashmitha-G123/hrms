@@ -12,7 +12,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { fetchProfile } from '../../services/authService';
 import { fetchTasks, pauseAllTimersApi } from '../../services/taskService';
 import { fetchAnnouncements } from '../../services/announcementService';
-import { fetchRecentNotificationsApi } from '../../services/notificationService';
+import { fetchRecentNotificationsApi, markNotificationReadApi, markAllNotificationsReadApi } from '../../services/notificationService';
 import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../design-system/tokens';
 import { Avatar } from '../../design-system/components/Avatar';
 import { Badge, statusToVariant } from '../../design-system/components/Badge';
@@ -25,12 +25,6 @@ const CARD_W = (SCREEN_W - 16 * 2 - 10) / 2;
 const WEEK_DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 const QUICK_ACTIONS = [
-  // { icon: 'time-outline' as const, label: 'Check In', color: '#34D399', route: '/(tabs)/attendance' },
-  // { icon: 'calendar-outline' as const, label: 'Apply Leave', color: '#FBBF24', route: '/leaves/apply' },
-  // { icon: 'receipt-outline' as const, label: 'Expense', color: '#4DA8DA', route: '/expenses' },
-  // { icon: 'people-outline' as const, label: 'Directory', color: '#56CCF2', route: '/employees' },
-  // { icon: 'bar-chart-outline' as const, label: 'Payroll', color: '#F87171', route: '/payroll' },
-  // { icon: 'chatbubbles-outline' as const, label: 'Chat', color: '#2E86B5', route: '/(tabs)/chat' },
   { icon: 'person-add-outline' as const, label: 'Leads', color: '#34D399', route: '/leads/add' },
   { icon: 'megaphone-outline' as const, label: 'Announcements', color: '#FF4D6D', route: '/announcements' },
   { icon: 'person-outline' as const, label: 'Profile', color: '#2E86B5', route: '/profile' },
@@ -103,6 +97,36 @@ function getGreeting() {
   return 'Good Evening';
 }
 
+const isNotificationRead = (n: any, currentUserId?: string) => {
+  const readList = n.readBy || n.readUsers || n.read_by || n.read || [];
+  const isReadArray = Array.isArray(readList) && (n.readBy || n.readUsers || n.read_by || Array.isArray(n.read));
+
+  if (!currentUserId) {
+    if (isReadArray) return false;
+    return !!n.read || !!n.isRead;
+  }
+  
+  // Sometimes APIs return a direct boolean if they pre-computed it
+  if (n.isRead === true || n.read === true) return true;
+  
+  if (Array.isArray(readList) && readList.length > 0) {
+    return readList.some((u: any) => {
+      let targetId = u;
+      if (typeof u === 'object' && u !== null) {
+        if (u.user && typeof u.user === 'object') {
+          targetId = u.user._id || u.user.id;
+        } else if (u.userId && typeof u.userId === 'object') {
+          targetId = u.userId._id || u.userId.id;
+        } else {
+          targetId = u.user || u.userId || u._id || u.id;
+        }
+      }
+      return targetId?.toString() === currentUserId?.toString();
+    });
+  }
+  return false;
+};
+
 const formatTimeDisplay = (timeStr: string | null) => {
   if (!timeStr) return '--:--';
   if (timeStr.includes('AM') || timeStr.includes('PM') || timeStr.includes('am') || timeStr.includes('pm')) {
@@ -124,7 +148,6 @@ const formatTimeDisplay = (timeStr: string | null) => {
 async function detectLocationWithFallback(): Promise<{ location: string; latitude?: number; longitude?: number; locationSource: 'gps' | 'ip' | 'manual' }> {
   return new Promise((resolve) => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      // Direct fallback to IP location
       fetchIpLocation()
         .then(ipLoc => {
           if (ipLoc && ipLoc.location) {
@@ -211,11 +234,11 @@ export default function DashboardScreen() {
   const [checkOutTime, setCheckOutTime] = useState('--:--');
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Dashboard API States
   const [profile, setProfile] = useState<any>(null);
   const [tasks, setTasks] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [apiUnreadCount, setApiUnreadCount] = useState<number | null>(null);
   const [detectedLocation, setDetectedLocation] = useState('Detecting location...');
   const [detectedLocObj, setDetectedLocObj] = useState<CheckLocationPayload | null>(null);
 
@@ -254,7 +277,6 @@ export default function DashboardScreen() {
   const loadDashboardData = async () => {
     await loadTodayStatus();
 
-    // Detect location automatically
     try {
       setDetectedLocation('Detecting location...');
       const locRes = await detectLocationWithFallback();
@@ -265,17 +287,17 @@ export default function DashboardScreen() {
       setDetectedLocObj({ location: 'Home Office', locationSource: 'manual' });
     }
 
-    // Fetch profile
     try {
       const pData = await fetchProfile();
       if (pData && pData.user) {
         setProfile(pData.user);
+      } else if (pData) {
+        setProfile(pData);
       }
     } catch (e) {
       console.warn('Dashboard failed to load profile:', e);
     }
 
-    // Fetch tasks
     try {
       const tData = await fetchTasks();
       if (tData && Array.isArray(tData.items)) {
@@ -287,7 +309,6 @@ export default function DashboardScreen() {
       console.warn('Dashboard failed to load tasks:', e);
     }
 
-    // Fetch announcements
     try {
       const aData = await fetchAnnouncements();
       if (aData && Array.isArray(aData.data)) {
@@ -299,10 +320,18 @@ export default function DashboardScreen() {
       console.warn('Dashboard failed to load announcements:', e);
     }
 
-    // Fetch notifications
     try {
       const nData = await fetchRecentNotificationsApi();
-      if (nData && Array.isArray(nData.data)) {
+      
+      if (nData && typeof nData.unreadCount === 'number') {
+        setApiUnreadCount(nData.unreadCount);
+      } else {
+        setApiUnreadCount(null);
+      }
+
+      if (nData && Array.isArray(nData.notifications)) {
+        setNotifications(nData.notifications);
+      } else if (nData && Array.isArray(nData.data)) {
         setNotifications(nData.data);
       } else if (Array.isArray(nData)) {
         setNotifications(nData);
@@ -322,7 +351,6 @@ export default function DashboardScreen() {
     if (actionLoading) return;
     setActionLoading(true);
     try {
-      // 1. Call IP location API
       let ipLoc = null;
       try {
         ipLoc = await fetchIpLocation();
@@ -330,7 +358,6 @@ export default function DashboardScreen() {
         console.warn('Failed to fetch IP location API:', err);
       }
 
-      // 2. Build default check payload from IP location response if available
       let payload: CheckLocationPayload = {
         location: 'Home Office',
         locationSource: 'manual'
@@ -345,7 +372,6 @@ export default function DashboardScreen() {
         };
       }
 
-      // 3. Override payload with GPS data if active
       if (detectedLocObj && detectedLocObj.locationSource === 'gps') {
         payload = {
           location: detectedLocObj.location,
@@ -398,7 +424,8 @@ export default function DashboardScreen() {
     setRefreshing(false);
   };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const currentUserId = profile?._id || profile?.id;
+  const unreadCount = apiUnreadCount !== null ? apiUnreadCount : notifications.filter(n => !isNotificationRead(n, currentUserId)).length;
   const activeTasksCount = tasks.filter(t => t.status === 'in-progress' || t.status === 'in_progress' || t.status === 'todo').length;
   const pendingTasksCount = tasks.filter(t => t.status === 'paused' || t.status === 'in_progress').length;
   const leaveBalance = profile?.leaveBalance?.remaining
@@ -406,12 +433,40 @@ export default function DashboardScreen() {
     : 8;
   const stats = STATS(activeTasksCount, pendingTasksCount, leaveBalance, '96%');
 
-  const handleMarkAllRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  const handleMarkAllRead = async () => {
+    try {
+      await markAllNotificationsReadApi();
+      setApiUnreadCount(0);
+      setNotifications(prev => prev.map(n => {
+        if (Array.isArray(n.readBy)) return { ...n, readBy: [...n.readBy, currentUserId] };
+        if (Array.isArray(n.read)) return { ...n, read: [...n.read, { user: currentUserId }] };
+        return { ...n, read: true, isRead: true };
+      }));
+    } catch (err: any) {
+      console.warn('Failed to mark all as read:', err);
+    }
   };
 
-  const handleToggleRead = (id: string) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: !n.read } : n));
+  const handleToggleRead = async (id: string) => {
+    try {
+      await markNotificationReadApi(id);
+      
+      const notif = notifications.find(n => (n.id || n._id) === id);
+      if (notif && !isNotificationRead(notif, currentUserId)) {
+         setApiUnreadCount(prev => (prev !== null && prev > 0) ? prev - 1 : prev);
+      }
+
+      setNotifications(prev => prev.map(n => {
+        if ((n.id || n._id) === id) {
+          if (Array.isArray(n.readBy)) return { ...n, readBy: [...n.readBy, currentUserId] };
+          if (Array.isArray(n.read)) return { ...n, read: [...n.read, { user: currentUserId }] };
+          return { ...n, read: true, isRead: true };
+        }
+        return n;
+      }));
+    } catch (err: any) {
+      console.warn('Failed to toggle read:', err);
+    }
   };
 
   const name = profile?.name || 'Venil Mottana';
@@ -684,20 +739,20 @@ export default function DashboardScreen() {
           </View>
 
           <View style={s.notifList}>
-            {notifications.filter(item => !item.read).length === 0 ? (
+            {notifications.filter(item => !isNotificationRead(item, currentUserId)).length === 0 ? (
               <View style={{ paddingVertical: 24, alignItems: 'center', justifyContent: 'center' }}>
                 <Ionicons name="notifications-off-outline" size={24} color={Colors.gray300} style={{ marginBottom: 4 }} />
                 <Text style={{ color: Colors.gray400, fontSize: 12, fontWeight: '500' }}>No unread notifications</Text>
               </View>
             ) : (
-              notifications.filter(item => !item.read).slice(0, 3).map((item) => (
-                <View key={item._id || item.id} style={[s.notifItem, !item.read && s.notifItemUnread]}>
-                  {!item.read && <View style={s.unreadBar} />}
+              notifications.filter(item => !isNotificationRead(item, currentUserId)).slice(0, 3).map((item) => (
+                <View key={item._id || item.id} style={[s.notifItem, !isNotificationRead(item, currentUserId) && s.notifItemUnread]}>
+                  {!isNotificationRead(item, currentUserId) && <View style={s.unreadBar} />}
                   <View style={s.notifIconCircle}>
                     <Ionicons
                       name={item.type === 'announcement' ? 'megaphone-outline' : 'person-outline'}
                       size={14}
-                      color={item.read ? Colors.gray500 : '#2563EB'}
+                      color={isNotificationRead(item, currentUserId) ? Colors.gray500 : '#2563EB'}
                     />
                   </View>
                   <View style={s.notifContent}>
@@ -705,14 +760,14 @@ export default function DashboardScreen() {
                     <Text style={s.notifDesc} numberOfLines={2}>{item.message}</Text>
                     <View style={s.notifDateRow}>
                       <Ionicons name="time-outline" size={10} color={Colors.gray400} />
-                      <Text style={s.notifDate}>{item.time}</Text>
+                      <Text style={s.notifDate}>{item.time || (item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '')}</Text>
                     </View>
                   </View>
-                  <TouchableOpacity onPress={() => handleToggleRead(item.id)} style={s.notifCheck}>
+                  <TouchableOpacity onPress={() => handleToggleRead(item.id || item._id)} style={s.notifCheck}>
                     <Ionicons
-                      name={item.read ? "checkmark-circle" : "ellipse-outline"}
+                      name={isNotificationRead(item, currentUserId) ? "checkmark-circle" : "ellipse-outline"}
                       size={18}
-                      color={item.read ? '#34D399' : Colors.gray300}
+                      color={isNotificationRead(item, currentUserId) ? '#34D399' : Colors.gray300}
                     />
                   </TouchableOpacity>
                 </View>
@@ -1411,3 +1466,4 @@ const s = StyleSheet.create({
     textAlign: 'center',
   },
 });
+

@@ -142,7 +142,7 @@ export default function ProfileScreen() {
           <Text style={styles.heroId}>ID: {employeeId}</Text>
         </View>
 
-        <View style={styles.statsRow}>
+        {/* <View style={styles.statsRow}>
           {[
             { label: 'Tasks', value: '6', iconName: 'list-outline' as IoniconName, color: '#428DFF' },
             { label: 'Leave Days', value: `${profile?.leaveBalance?.remaining?.annual || 0}`, iconName: 'calendar-outline' as IoniconName, color: '#10C185' },
@@ -156,7 +156,7 @@ export default function ProfileScreen() {
               </View>
             </View>
           ))}
-        </View>
+        </View> */}
 
         <Card style={styles.infoCard}>
           <Text style={styles.sectionLabel}>Employee Information</Text>

@@ -1,6 +1,6 @@
 import { getToken, getTenantId } from './authService';
 
-const BASE_URL = 'https://hrms-api.genmindz.in/api';
+const BASE_URL = 'https://workspace-api.genmindz.in/api';
 
 const ensureBaseUrl = () => {
   if (__DEV__ && BASE_URL.includes('your-api')) {
@@ -18,11 +18,11 @@ export interface Notification {
   time?: string;
 }
 
-export const fetchRecentNotificationsApi = async (): Promise<{ success: boolean; data: Notification[] }> => {
+export const fetchRecentNotificationsApi = async (): Promise<{ success: boolean; data?: Notification[]; notifications?: Notification[]; unreadCount?: number }> => {
   ensureBaseUrl();
   const token = await getToken();
   const tenantId = await getTenantId();
-  const res = await fetch(`${BASE_URL}/notifications/recent`, {
+  const res = await fetch(`${BASE_URL}/notifications`, {
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',

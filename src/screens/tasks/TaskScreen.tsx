@@ -25,8 +25,11 @@ import {
   fetchTaskStatisticsCounts,
   fetchTaskDetails,
   updateTaskStatusPatch,
+  updateTaskApi,
 } from '../../services/taskService';
 import { fetchProfile } from '../../services/authService';
+import { fetchEmployeesSelectionApi } from '../../services/employeeService';
+import { fetchProjectsApi, Project } from '../../services/projectService';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 type Status = 'todo' | 'in-progress' | 'completed' | 'paused';
@@ -203,7 +206,7 @@ function EditModal({ task, onSave, onClose }: {
           <View style={mo.optRow}>
             {PRIS.map(p => {
               const cfg = PRIORITY_BADGE[p];
-              const active = priority === p;
+              const active = priority?.toLowerCase() === p.toLowerCase();
               return (
                 <TouchableOpacity
                   key={p}
@@ -739,7 +742,7 @@ export default function TaskScreen() {
   const [loading, setLoading] = useState(true);
 
   // Role & Admin Task Stats State
-  const [userRole, setUserRole] = useState<'employee' | 'superadmin' | 'hr' | 'manager'>('employee');
+  const [userRole, setUserRole] = useState<'employee' | 'superadmin' | 'hr' | 'manager' | 'admin'>('employee');
   const [adminStats, setAdminStats] = useState<any>(null);
 
   // Modal Views
@@ -750,15 +753,24 @@ export default function TaskScreen() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  const [newProject, setNewProject] = useState('HRMS Mobile App');
+  const [newProject, setNewProject] = useState('');
   const [newPriority, setNewPriority] = useState<'low' | 'medium' | 'high'>('medium');
   const [newStartDate, setNewStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [newDueDate, setNewDueDate] = useState(
     new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   );
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>([]);
+  const [selectionEmployees, setSelectionEmployees] = useState<any[]>([]);
+  const [selectionProjects, setSelectionProjects] = useState<Project[]>([]);
 
-  // ── Load Role Check & Statistics ──
+  // Set default newProject once projects load
+  useEffect(() => {
+    if (selectionProjects.length > 0 && !newProject) {
+      setNewProject(selectionProjects[0].name);
+    }
+  }, [selectionProjects, newProject]);
+
+  // ── Load Role Check, Statistics, Employee & Project Selection ──
   useEffect(() => {
     const checkRoleAndLoadStats = async () => {
       try {
@@ -766,7 +778,7 @@ export default function TaskScreen() {
         if (profileData && profileData.user) {
           const role = profileData.user.role || 'employee';
           setUserRole(role);
-          if (role === 'superadmin' || role === 'hr' || role === 'manager') {
+          if (role === 'superadmin' || role === 'hr' || role === 'manager' || role === 'admin') {
             const statsRes = await fetchTaskStatisticsCounts().catch(() => null);
             if (statsRes && statsRes.success) {
               setAdminStats(statsRes.data);
@@ -778,13 +790,33 @@ export default function TaskScreen() {
       }
     };
     checkRoleAndLoadStats();
+
+    fetchEmployeesSelectionApi(1, 100)
+      .then(res => {
+        if (res && res.success && Array.isArray(res.employees)) {
+          setSelectionEmployees(res.employees);
+        }
+      })
+      .catch(err => {
+        console.warn('Failed to load employees for selection:', err);
+      });
+
+    fetchProjectsApi(1, 100)
+      .then(res => {
+        if (res && res.success && Array.isArray(res.items)) {
+          setSelectionProjects(res.items);
+        }
+      })
+      .catch(err => {
+        console.warn('Failed to load projects for selection:', err);
+      });
   }, []);
 
   // ── Load Tasks ──
   const loadTasks = async (showIndicator = true) => {
     if (showIndicator) setLoading(true);
     try {
-      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager') {
+      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager' || userRole === 'admin') {
         const apiStatus = status !== 'All' ? (status === 'To Do' ? 'Pending' : status === 'In Progress' ? 'In Progress' : 'Completed') : undefined;
         const res = await fetchAllTasks({
           page: 1,
@@ -809,7 +841,10 @@ export default function TaskScreen() {
           apiParams.status = apiStatus;
         }
         if (project !== 'All Projects') {
-          apiParams.projectId = PROJECT_IDS[project];
+          const found = selectionProjects.find(p => p.name === project);
+          if (found) {
+            apiParams.projectId = found._id;
+          }
         }
 
         const data = await fetchTasks(apiParams);
@@ -843,7 +878,7 @@ export default function TaskScreen() {
 
   const handleStatusChange = async (id: string, st: Status) => {
     try {
-      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager') {
+      if (userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager' || userRole === 'admin') {
         const apiStatus = st === 'completed' ? 'Completed' : st === 'in-progress' ? 'In Progress' : 'Pending';
         await updateTaskStatusPatch(id, apiStatus);
         setTasks(prev => prev.map(t => (t._id || t.projectId) === id ? { ...t, status: st } : t));
@@ -895,15 +930,23 @@ export default function TaskScreen() {
 
   const handleSave = async (updated: Task) => {
     const taskId = updated._id || updated.projectId;
-    const original = tasks.find(t => (t._id || t.projectId) === taskId);
-    if (original && original.status !== updated.status) {
-      try {
-        await handleStatusChange(taskId, updated.status as Status);
-      } catch (err) {
-        console.warn('Failed to update task status in save:', err);
+    try {
+      const payload = {
+        title: updated.title,
+        priority: updated.priority.charAt(0).toUpperCase() + updated.priority.slice(1), // format e.g. High
+        status: updated.status === 'completed' ? 'done' : (updated.status === 'in-progress' ? 'in_progress' : updated.status),
+      };
+      
+      const res = await updateTaskApi(taskId, payload);
+      if (res && res.success) {
+        Alert.alert('Success', 'Task updated successfully.');
+        loadTasks(false);
       }
+    } catch (err: any) {
+      console.warn('Failed to update task details via API:', err);
+      // Fallback local state update
+      setTasks(prev => prev.map(t => (t._id || t.projectId) === taskId ? { ...t, title: updated.title, priority: updated.priority, status: updated.status } : t));
     }
-    setTasks(prev => prev.map(t => (t._id || t.projectId) === taskId ? { ...t, title: updated.title, priority: updated.priority } : t));
     setEditTask(null);
   };
 
@@ -916,7 +959,8 @@ export default function TaskScreen() {
     setFormLoading(true);
     try {
       const formData = new FormData();
-      formData.append('projectId', PROJECT_IDS[newProject] || '60d0feb25311236168a109d9');
+      const foundProject = selectionProjects.find(p => p.name === newProject);
+      formData.append('projectId', foundProject ? foundProject._id : '6a574d8534de5505149e3d51');
       formData.append('title', newTitle.trim());
       formData.append('priority', newPriority.charAt(0).toUpperCase() + newPriority.slice(1));
 
@@ -1007,10 +1051,10 @@ export default function TaskScreen() {
         <View style={s.headerTop}>
           <View>
             <Text style={s.pageTitle}>
-              {userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager' ? 'All Tasks' : 'My Tasks'}
+              {userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager' || userRole === 'admin' ? 'All Tasks' : 'My Tasks'}
             </Text>
             <Text style={s.pageSubtitle}>
-              {userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager'
+              {userRole === 'superadmin' || userRole === 'hr' || userRole === 'manager' || userRole === 'admin'
                 ? `${tasks.length} tasks active in the organization`
                 : `${tasks.length} tasks assigned to you`}
             </Text>
@@ -1106,7 +1150,7 @@ export default function TaskScreen() {
               />
               <Dropdown
                 value={project === 'All Projects' ? 'Project' : project.split(' ')[0]}
-                options={PROJECT_OPTIONS} open={showPrjDrop} alignRight
+                options={selectionProjects.length > 0 ? ['All Projects', ...selectionProjects.map(p => p.name)] : PROJECT_OPTIONS} open={showPrjDrop} alignRight
                 onToggle={() => { setShowPrjDrop(v => !v); setShowPriDrop(false); setShowStaDrop(false); }}
                 onSelect={o => { setProject(o); setShowPrjDrop(false); }}
               />
@@ -1200,7 +1244,7 @@ export default function TaskScreen() {
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
               <Text style={st.fieldLabel}>Project *</Text>
               <View style={st.pickerContainer}>
-                {['HRMS Mobile App', 'MMNext Platform'].map(p => (
+                {(selectionProjects.length > 0 ? selectionProjects.map(p => p.name) : ['HRMS Mobile App', 'MMNext Platform']).map(p => (
                   <TouchableOpacity key={p} style={[st.pickerChip, newProject === p && st.pickerChipActive]} onPress={() => setNewProject(p)}>
                     <Text style={[st.pickerChipText, newProject === p && st.pickerChipTextActive]}>{p}</Text>
                   </TouchableOpacity>
@@ -1227,10 +1271,11 @@ export default function TaskScreen() {
 
               <Text style={st.fieldLabel}>Assignees (Team Members)</Text>
               <View style={st.pickerContainer}>
-                {mockEmployees.map(emp => {
-                  const selected = selectedAssignees.includes(emp.id);
+                {(selectionEmployees.length > 0 ? selectionEmployees : mockEmployees).map(emp => {
+                  const empId = emp._id || emp.id || '';
+                  const selected = selectedAssignees.includes(empId);
                   return (
-                    <TouchableOpacity key={emp.id} style={[st.pickerChip, selected && st.pickerChipActive]} onPress={() => toggleAssignee(emp.id)}>
+                    <TouchableOpacity key={empId} style={[st.pickerChip, selected && st.pickerChipActive]} onPress={() => toggleAssignee(empId)}>
                       <Text style={[st.pickerChipText, selected && st.pickerChipTextActive]}>{emp.name}</Text>
                     </TouchableOpacity>
                   );

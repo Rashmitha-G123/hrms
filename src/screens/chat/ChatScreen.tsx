@@ -106,7 +106,7 @@ function ChatRow({ item, onPress, index }: { item: ChatItem; onPress: () => void
           {item.isGroup && (
             <Text style={styles.chatRowMeta}>{item.members} members · Group</Text>
           )}
-          {!item.isGroup && item.role && (
+          {!item.isGroup && !!item.role && (
             <Text style={styles.chatRowMeta}>{item.role}</Text>
           )}
         </View>

@@ -9,7 +9,7 @@ import { Colors, Typography, Spacing, Radius } from '../../design-system/tokens'
 import { Avatar } from '../../design-system/components/Avatar';
 import { mockEmployees, mockChats } from '../../data/mockData';
 import { getOrCreateDirectChat } from '../../services/chatService';
-import { fetchEmployees } from '../../services/employeeService';
+import { fetchEmployeesSelectionApi } from '../../services/employeeService';
 
 export default function NewChatScreen() {
   const router = useRouter();
@@ -19,7 +19,8 @@ export default function NewChatScreen() {
 
   const loadEmployees = async () => {
     try {
-      const list = await fetchEmployees();
+      const res = await fetchEmployeesSelectionApi(1, 100);
+      const list = res && Array.isArray(res.employees) ? res.employees : [];
       const mapped = list.map((emp: any) => ({
         id: emp._id,
         name: emp.name || (emp.employeePersonal && emp.employeePersonal.fullName) || 'Unknown Employee',
@@ -86,7 +87,16 @@ export default function NewChatScreen() {
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity 
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/(tabs)/chat');
+            }
+          }} 
+          style={styles.backBtn}
+        >
           <Ionicons name="arrow-back" size={22} color={Colors.white} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>New Message</Text>

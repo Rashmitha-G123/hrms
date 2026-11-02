@@ -1,4 +1,4 @@
-const BASE_URL = 'https://hrms-api.genmindz.in/api';
+const BASE_URL = 'https://workspace-api.genmindz.in/api';
 
 async function probe(endpoint, method = 'GET', body = null, token = null) {
   const headers = {
@@ -40,7 +40,7 @@ async function run() {
     const capRes = await fetch(`${BASE_URL}/auth/captcha`, { headers: { 'X-Tenant-Id': 'company' } });
     const captchaData = await capRes.json();
     console.log('Captcha:', captchaData);
-    
+
     const loginRes = await probe('/auth/login', 'POST', {
       email: 'superadmin@company.com',
       password: 'SecurePassword123',

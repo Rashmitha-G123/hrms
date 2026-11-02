@@ -1,6 +1,6 @@
 import { getToken, getTenantId } from './authService';
 
-const BASE_URL = 'https://hrms-api.genmindz.in/api';
+const BASE_URL = 'https://workspace-api.genmindz.in/api';
 
 const ensureBaseUrl = () => {
   if (__DEV__ && BASE_URL.includes('your-api')) {
@@ -154,7 +154,9 @@ export const clearConversationHistory = async (conversationId: string): Promise<
   ensureBaseUrl();
   const token = await getToken();
   const tenantId = await getTenantId();
-  const res = await fetch(`${BASE_URL}/chat/conversations/${conversationId}/messages`, {
+  const url = `${BASE_URL}/chat/conversations/${conversationId}/messages`;
+  console.log('[DEBUG] clearConversationHistory request URL:', url);
+  const res = await fetch(url, {
     method: 'DELETE',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -162,7 +164,9 @@ export const clearConversationHistory = async (conversationId: string): Promise<
       'X-Tenant-Id': tenantId,
     },
   });
+  console.log('[DEBUG] clearConversationHistory response status:', res.status);
   const data = await res.json();
+  console.log('[DEBUG] clearConversationHistory response data:', JSON.stringify(data));
   if (!res.ok) {
     throw new Error(data.message || 'Failed to clear conversation history');
   }

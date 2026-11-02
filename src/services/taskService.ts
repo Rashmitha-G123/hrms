@@ -1,6 +1,6 @@
 import { getToken, getTenantId } from './authService';
 
-const BASE_URL = 'https://hrms-api.genmindz.in/api';
+const BASE_URL = 'https://workspace-api.genmindz.in/api';
 
 const ensureBaseUrl = () => {
   if (__DEV__ && BASE_URL.includes('your-api')) {
@@ -113,8 +113,7 @@ export const fetchTasks = async (params?: {
     if (params.search !== undefined) qps.push(`search=${encodeURIComponent(params.search)}`);
     if (params.priority !== undefined) qps.push(`priority=${encodeURIComponent(params.priority)}`);
     if (params.status !== undefined) {
-      const statusParam = params.status === 'in-progress' ? 'in_progress' : params.status;
-      qps.push(`status=${statusParam}`);
+      qps.push(`status=${encodeURIComponent(params.status)}`);
     }
     if (params.projectId !== undefined) qps.push(`projectId=${encodeURIComponent(params.projectId)}`);
     if (qps.length > 0) {
@@ -408,6 +407,38 @@ export const updateTaskStatusPatch = async (
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.message || 'Failed to update task status');
+  }
+  return data;
+};
+
+export const updateTaskApi = async (
+  taskId: string,
+  payload: Partial<Task> | FormData,
+): Promise<{ success: boolean; task: Task }> => {
+  ensureBaseUrl();
+  const token = await getToken();
+  const tenantId = await getTenantId();
+  
+  const isFormData = payload instanceof FormData;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    'X-Tenant-Id': tenantId,
+  };
+  if (!isFormData) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const res = await fetch(`${BASE_URL}/tasks/${taskId}`, {
+    method: 'PUT',
+    headers,
+    body: isFormData ? (payload as FormData) : JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to update task');
+  }
+  if (data && data.task) {
+    data.task = normalizeTask(data.task);
   }
   return data;
 };

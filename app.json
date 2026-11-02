@@ -2,6 +2,7 @@
   "expo": {
     "name": "MetroMindz HRMS",
     "slug": "hrms-mobile",
+    "owner": "rashmithag123",
     "version": "2.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -45,7 +46,6 @@
       "eas": {
         "projectId": "aa150490-1229-47d8-8157-2b7ecdbca577"
       }
-    },
-    "owner": "rashmithag123"
+    }
   }
 }

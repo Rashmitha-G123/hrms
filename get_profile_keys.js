@@ -1,9 +1,13 @@
-const BASE_URL = 'https://hrms-api.genmindz.in/api';
+const BASE_URL = 'https://workspace-api.genmindz.in/api';
 async function run() {
   console.log("Fetching Captcha...");
   try {
     const capRes = await fetch(`${BASE_URL}/auth/captcha`, { headers: { 'X-Tenant-Id': 'company' } });
     const captchaData = await capRes.json();
+    const textMatches = captchaData.image.match(/<text[^>]*>([^<]+)<\/text>/g) || [];
+    const captchaCode = textMatches.map(m => m.replace(/<text[^>]*>|<\/text>/g, '')).join('');
+    console.log("Extracted Captcha Code:", captchaCode);
+
     console.log("Logging in as Superadmin...");
     const loginRes = await fetch(`${BASE_URL}/auth/login`, {
       method: 'POST',
@@ -14,7 +18,7 @@ async function run() {
       body: JSON.stringify({
         email: 'superadmin@company.com',
         password: 'SecurePassword123',
-        captcha: 'XYZW',
+        captcha: captchaCode,
         captchaToken: captchaData.captchaToken
       })
     });

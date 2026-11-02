@@ -485,12 +485,12 @@ const styles = StyleSheet.create({
     minWidth: 36, minHeight: 36, alignItems: 'center', justifyContent: 'center',
   },
   logoBox: {
-    width: 52, height: 52, borderRadius: 14,
+    width: 110, height: 46, borderRadius: 10,
     backgroundColor: Colors.white,
     alignItems: 'center', justifyContent: 'center',
-    marginBottom: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
+    marginBottom: 14, paddingHorizontal: 8, paddingVertical: 6,
   },
-  logoImage: { width: 40, height: 40 },
+  logoImage: { width: '100%', height: '100%' },
   headerTitle: { fontSize: Typography.fontSize['2xl'], fontWeight: '800', color: Colors.white, marginBottom: 5, letterSpacing: -0.3 },
   headerSub: { fontSize: Typography.fontSize.sm, color: 'rgba(255,255,255,0.7)', lineHeight: 20 },
 
