@@ -1,17 +1,47 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, StatusBar } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, StatusBar, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../design-system/tokens';
 import { Card, ProgressBar } from '../../design-system/components/Card';
 import { Badge, statusToVariant } from '../../design-system/components/Badge';
 import { Avatar } from '../../design-system/components/Avatar';
-import { mockProjects } from '../../data/mockData';
+import { fetchProjectsApi, Project } from '../../services/projectService';
 
 export default function ProjectsScreen() {
   const router = useRouter();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'active' | 'on-hold'>('all');
-  const filtered = filter === 'all' ? mockProjects : mockProjects.filter(p => p.status === filter);
+
+  const loadProjects = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetchProjectsApi();
+      if (res && Array.isArray(res.items)) {
+        setProjects(res.items);
+      } else {
+        setProjects([]);
+      }
+    } catch (err) {
+      console.warn('Failed to load projects:', err);
+      setProjects([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
+
+  const filtered = filter === 'all'
+    ? projects
+    : projects.filter(p => (p.status || '').toLowerCase() === filter.toLowerCase());
+
+  const activeCount = projects.filter(p => (p.status || '').toLowerCase() === 'active').length;
+  const onHoldCount = projects.filter(p => (p.status || '').toLowerCase() === 'on-hold').length;
+  const totalTasksDone = projects.reduce((a, p) => a + (p.tasksCompleted || 0), 0);
 
   return (
     <View style={styles.container}>
@@ -22,11 +52,20 @@ export default function ProjectsScreen() {
           <Ionicons name="arrow-back" size={22} color={Colors.white} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Projects</Text>
-        <Text style={styles.headerSub}>{mockProjects.length} total projects</Text>
+        <Text style={styles.headerSub}>{projects.length} total projects</Text>
         <View style={styles.statsRow}>
-          <View style={styles.statBox}><Text style={styles.statNum}>{mockProjects.filter(p => p.status === 'active').length}</Text><Text style={styles.statLabel}>Active</Text></View>
-          <View style={styles.statBox}><Text style={styles.statNum}>{mockProjects.filter(p => p.status === 'on-hold').length}</Text><Text style={styles.statLabel}>On Hold</Text></View>
-          <View style={styles.statBox}><Text style={styles.statNum}>{mockProjects.reduce((a, p) => a + p.tasksCompleted, 0)}</Text><Text style={styles.statLabel}>Tasks Done</Text></View>
+          <View style={styles.statBox}>
+            <Text style={styles.statNum}>{activeCount}</Text>
+            <Text style={styles.statLabel}>Active</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={styles.statNum}>{onHoldCount}</Text>
+            <Text style={styles.statLabel}>On Hold</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={styles.statNum}>{totalTasksDone}</Text>
+            <Text style={styles.statLabel}>Tasks Done</Text>
+          </View>
         </View>
       </View>
 
@@ -41,54 +80,81 @@ export default function ProjectsScreen() {
           ))}
         </ScrollView>
 
-        {filtered.map(project => (
-          <Card key={project.id} onPress={() => router.push(`/projects/${project.id}` as any)} elevated>
-            <View style={styles.projectHeader}>
-              <View style={styles.projectIconBox}>
-                <Ionicons name="folder-open-outline" size={22} color={Colors.primary} />
-              </View>
-              <View style={styles.projectMeta}>
-                <Text style={styles.projectName}>{project.name}</Text>
-                <Text style={styles.projectClient}>Client: {project.client}</Text>
-              </View>
-              <Badge label={project.status} variant={statusToVariant[project.status] || 'neutral'} />
-            </View>
-            <Text style={styles.projectDesc} numberOfLines={2}>{project.description}</Text>
-            <View style={styles.progressSection}>
-              <View style={styles.progressHeader}>
-                <Text style={styles.progressLabel}>Progress</Text>
-                <Text style={[styles.progressValue, { color: project.progress > 75 ? Colors.success : project.progress > 40 ? Colors.primary : Colors.warning }]}>
-                  {project.progress}%
-                </Text>
-              </View>
-              <ProgressBar progress={project.progress} color={project.progress > 75 ? Colors.success : project.progress > 40 ? Colors.primary : Colors.warning} height={8} />
-            </View>
-            <View style={styles.projectDetails}>
-              <View style={styles.detailItem}>
-                <Ionicons name="checkmark-circle-outline" size={14} color={Colors.gray500} />
-                <Text style={styles.detailText}> {project.tasksCompleted}/{project.tasksTotal} tasks</Text>
-              </View>
-              <View style={styles.detailItem}>
-                <Ionicons name="calendar-outline" size={14} color={Colors.gray500} />
-                <Text style={styles.detailText}> Due {project.endDate}</Text>
-              </View>
-              <Badge label={project.priority} variant={project.priority === 'high' ? 'danger' : 'warning'} />
-            </View>
-            <View style={styles.teamSection}>
-              <Text style={styles.teamLabel}>Team</Text>
-              <View style={styles.teamAvatars}>
-                {project.team.slice(0, 4).map((t, i) => (
-                  <Avatar key={i} initials={t} size={28} style={{ marginLeft: i > 0 ? -10 : 0 }} />
-                ))}
-                {project.team.length > 4 && (
-                  <View style={styles.moreMembersBox}>
-                    <Text style={styles.moreMembersText}>+{project.team.length - 4}</Text>
+        {loading ? (
+          <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color={Colors.primary} />
+            <Text style={{ marginTop: 8, fontSize: Typography.fontSize.sm, color: Colors.gray500 }}>Loading projects...</Text>
+          </View>
+        ) : filtered.length === 0 ? (
+          <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+            <Ionicons name="folder-open-outline" size={48} color={Colors.gray300} />
+            <Text style={{ marginTop: 12, fontSize: Typography.fontSize.base, fontWeight: '600', color: Colors.gray600 }}>
+              No projects found
+            </Text>
+          </View>
+        ) : (
+          filtered.map(project => {
+            const progress = project.progress ?? 0;
+            const statusKey = project.status || 'active';
+            const teamMembers = Array.isArray(project.team) ? project.team : [];
+            return (
+              <Card key={project._id} onPress={() => router.push(`/projects/${project._id}` as any)} elevated>
+                <View style={styles.projectHeader}>
+                  <View style={styles.projectIconBox}>
+                    <Ionicons name="folder-open-outline" size={22} color={Colors.primary} />
+                  </View>
+                  <View style={styles.projectMeta}>
+                    <Text style={styles.projectName}>{project.name}</Text>
+                    {project.client ? <Text style={styles.projectClient}>Client: {project.client}</Text> : null}
+                  </View>
+                  <Badge label={project.status || 'Active'} variant={statusToVariant[statusKey] || 'neutral'} />
+                </View>
+                {project.description ? (
+                  <Text style={styles.projectDesc} numberOfLines={2}>{project.description}</Text>
+                ) : null}
+                <View style={styles.progressSection}>
+                  <View style={styles.progressHeader}>
+                    <Text style={styles.progressLabel}>Progress</Text>
+                    <Text style={[styles.progressValue, { color: progress > 75 ? Colors.success : progress > 40 ? Colors.primary : Colors.warning }]}>
+                      {progress}%
+                    </Text>
+                  </View>
+                  <ProgressBar progress={progress} color={progress > 75 ? Colors.success : progress > 40 ? Colors.primary : Colors.warning} height={8} />
+                </View>
+                <View style={styles.projectDetails}>
+                  <View style={styles.detailItem}>
+                    <Ionicons name="checkmark-circle-outline" size={14} color={Colors.gray500} />
+                    <Text style={styles.detailText}> {project.tasksCompleted || 0}/{project.tasksTotal || 0} tasks</Text>
+                  </View>
+                  {project.endDate ? (
+                    <View style={styles.detailItem}>
+                      <Ionicons name="calendar-outline" size={14} color={Colors.gray500} />
+                      <Text style={styles.detailText}> Due {project.endDate}</Text>
+                    </View>
+                  ) : null}
+                  {project.priority ? (
+                    <Badge label={project.priority} variant={project.priority === 'high' ? 'danger' : 'warning'} />
+                  ) : null}
+                </View>
+                {teamMembers.length > 0 && (
+                  <View style={styles.teamSection}>
+                    <Text style={styles.teamLabel}>Team</Text>
+                    <View style={styles.teamAvatars}>
+                      {teamMembers.slice(0, 4).map((t, i) => (
+                        <Avatar key={i} initials={typeof t === 'string' ? t : (t.initials || t.name?.[0] || 'U')} size={28} style={{ marginLeft: i > 0 ? -10 : 0 }} />
+                      ))}
+                      {teamMembers.length > 4 && (
+                        <View style={styles.moreMembersBox}>
+                          <Text style={styles.moreMembersText}>+{teamMembers.length - 4}</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
                 )}
-              </View>
-            </View>
-          </Card>
-        ))}
+              </Card>
+            );
+          })
+        )}
         <View style={{ height: 100 }} />
       </ScrollView>
     </View>

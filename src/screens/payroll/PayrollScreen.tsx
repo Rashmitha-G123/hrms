@@ -1,27 +1,47 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Platform, StatusBar,
+  Platform, StatusBar, ActivityIndicator
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../design-system/tokens';
+import { Colors, Typography, Spacing, Radius, IconBox } from '../../design-system/tokens';
 import { Card, SectionHeader, Divider } from '../../design-system/components/Card';
 import { Badge } from '../../design-system/components/Badge';
-import { mockPayslips } from '../../data/mockData';
-
-const SALARY_BREAKDOWN = [
-  { label: 'Basic Salary', amount: 75000, type: 'earning' },
-  { label: 'HRA', amount: 30000, type: 'earning' },
-  { label: 'Special Allowance', amount: 20000, type: 'earning' },
-  { label: 'Provident Fund', amount: -12500, type: 'deduction' },
-  { label: 'Professional Tax', amount: -200, type: 'deduction' },
-  { label: 'Income Tax (TDS)', amount: -13850, type: 'deduction' },
-];
+import { fetchProfile } from '../../services/authService';
 
 export default function PayrollScreen() {
   const router = useRouter();
-  const latest = mockPayslips[0];
+  const [profile, setProfile] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadSalary = async () => {
+      try {
+        const data = await fetchProfile();
+        if (data && data.user) {
+          setProfile(data.user);
+        }
+      } catch (err) {
+        console.warn('Failed to load salary details:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadSalary();
+  }, []);
+
+  const salaryDetails = profile?.salaryDetails || {};
+  const ctc = parseFloat(salaryDetails.ctc || '0');
+  const monthlyGross = ctc > 0 ? Math.round(ctc / 12) : 0;
+  const paymentMode = salaryDetails.paymentMode || 'Bank Transfer';
+  const effectiveFrom = salaryDetails.effectiveFrom
+    ? new Date(salaryDetails.effectiveFrom).toLocaleDateString()
+    : 'N/A';
+
+  const basicSalary = monthlyGross > 0 ? Math.round(monthlyGross * 0.5) : 0;
+  const hra = monthlyGross > 0 ? Math.round(monthlyGross * 0.2) : 0;
+  const specialAllowance = monthlyGross > 0 ? Math.max(0, monthlyGross - (basicSalary + hra)) : 0;
 
   return (
     <View style={styles.container}>
@@ -32,88 +52,94 @@ export default function PayrollScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={Colors.white} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Payroll</Text>
-        <Text style={styles.headerSub}>Salary & payslip management</Text>
+        <Text style={styles.headerTitle}>Payroll & Compensation</Text>
+        <Text style={styles.headerSub}>Salary structure & payslip records</Text>
 
-        {/* Current Month Card */}
+        {/* Current Month / Annual CTC Card */}
         <View style={styles.salaryCard}>
           <View style={styles.salaryRow}>
             <View>
-              <Text style={styles.salaryLabel}>Net Salary — {latest.month}</Text>
-              <Text style={styles.salaryAmount}>₹{latest.netSalary.toLocaleString()}</Text>
+              <Text style={styles.salaryLabel}>Annual CTC</Text>
+              <Text style={styles.salaryAmount}>
+                {ctc > 0 ? `₹${ctc.toLocaleString()}` : 'Not Specified'}
+              </Text>
             </View>
-            <Badge label={latest.status} variant="success" />
+            <Badge label={profile?.status || 'Active'} variant="success" />
           </View>
           <View style={styles.salaryMeta}>
             <View style={styles.salaryMetaItem}>
-              <Text style={styles.salaryMetaLabel}>Gross</Text>
-              <Text style={styles.salaryMetaValue}>₹{latest.grossSalary.toLocaleString()}</Text>
+              <Text style={styles.salaryMetaLabel}>Est. Monthly</Text>
+              <Text style={styles.salaryMetaValue}>₹{monthlyGross.toLocaleString()}</Text>
             </View>
             <View style={styles.salaryMetaDivider} />
             <View style={styles.salaryMetaItem}>
-              <Text style={styles.salaryMetaLabel}>Deductions</Text>
-              <Text style={[styles.salaryMetaValue, { color: Colors.dangerLight }]}>-₹{latest.deductions.toLocaleString()}</Text>
+              <Text style={styles.salaryMetaLabel}>Payment Mode</Text>
+              <Text style={styles.salaryMetaValue}>{paymentMode}</Text>
             </View>
             <View style={styles.salaryMetaDivider} />
             <View style={styles.salaryMetaItem}>
-              <Text style={styles.salaryMetaLabel}>Paid On</Text>
-              <Text style={styles.salaryMetaValue}>{latest.paidOn}</Text>
+              <Text style={styles.salaryMetaLabel}>Effective From</Text>
+              <Text style={styles.salaryMetaValue}>{effectiveFrom}</Text>
             </View>
           </View>
         </View>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Breakdown */}
-        <SectionHeader title="Salary Breakdown — May 2025" />
-        <Card>
-          <View style={styles.breakdownHeader}>
-            <Text style={styles.breakdownCol}>Component</Text>
-            <Text style={styles.breakdownCol}>Amount</Text>
+        {loading ? (
+          <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color={Colors.primary} />
+            <Text style={{ marginTop: 8, fontSize: Typography.fontSize.sm, color: Colors.gray500 }}>
+              Loading salary details...
+            </Text>
           </View>
-          <Divider />
-          {SALARY_BREAKDOWN.map((item, i) => (
-            <View key={item.label}>
+        ) : (
+          <>
+            {/* Breakdown */}
+            <SectionHeader title="Estimated Monthly Breakdown" />
+            <Card>
+              <View style={styles.breakdownHeader}>
+                <Text style={styles.breakdownCol}>Component</Text>
+                <Text style={styles.breakdownCol}>Estimated Amount</Text>
+              </View>
+              <Divider />
               <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>{item.label}</Text>
-                <Text style={[styles.breakdownAmount, { color: item.type === 'deduction' ? Colors.danger : Colors.success }]}>
-                  {item.amount < 0 ? '-' : '+'}₹{Math.abs(item.amount).toLocaleString()}
+                <Text style={styles.breakdownLabel}>Basic Salary (50%)</Text>
+                <Text style={[styles.breakdownAmount, { color: Colors.success }]}>
+                  ₹{basicSalary.toLocaleString()}
                 </Text>
               </View>
-              {i < SALARY_BREAKDOWN.length - 1 && <Divider />}
-            </View>
-          ))}
-          <View style={styles.breakdownTotal}>
-            <Text style={styles.breakdownTotalLabel}>Net Salary</Text>
-            <Text style={styles.breakdownTotalAmount}>₹{latest.netSalary.toLocaleString()}</Text>
-          </View>
-        </Card>
+              <Divider />
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>House Rent Allowance (HRA 20%)</Text>
+                <Text style={[styles.breakdownAmount, { color: Colors.success }]}>
+                  ₹{hra.toLocaleString()}
+                </Text>
+              </View>
+              <Divider />
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>Special Allowance</Text>
+                <Text style={[styles.breakdownAmount, { color: Colors.success }]}>
+                  ₹{specialAllowance.toLocaleString()}
+                </Text>
+              </View>
+              <View style={styles.breakdownTotal}>
+                <Text style={styles.breakdownTotalLabel}>Monthly Gross</Text>
+                <Text style={styles.breakdownTotalAmount}>₹{monthlyGross.toLocaleString()}</Text>
+              </View>
+            </Card>
 
-        {/* Download */}
-        <TouchableOpacity style={styles.downloadBtn} activeOpacity={0.85}>
-          <Ionicons name="download-outline" size={20} color={Colors.white} />
-          <Text style={styles.downloadText}>Download May 2025 Payslip (PDF)</Text>
-        </TouchableOpacity>
-
-        {/* Payslip History */}
-        <SectionHeader title="Payslip History" />
-        {mockPayslips.map(slip => (
-          <Card key={slip.id} onPress={() => { }}>
-            <View style={styles.slipRow}>
-              <View style={styles.slipIcon}>
-                <Ionicons name="wallet-outline" size={22} color={Colors.primary} />
-              </View>
-              <View style={styles.slipInfo}>
-                <Text style={styles.slipMonth}>{slip.month}</Text>
-                <Text style={styles.slipDate}>Paid on {slip.paidOn}</Text>
-              </View>
-              <View style={styles.slipRight}>
-                <Text style={styles.slipNet}>₹{slip.netSalary.toLocaleString()}</Text>
-                <Badge label={slip.status} variant="success" />
-              </View>
+            {/* Payslip History */}
+            <SectionHeader title="Payslip History" />
+            <View style={styles.emptyContainer}>
+              <Ionicons name="document-text-outline" size={44} color={Colors.gray300} />
+              <Text style={styles.emptyTitle}>No Payslips Available</Text>
+              <Text style={styles.emptySub}>
+                Payslips will appear here once generated and published by HR for each payroll cycle.
+              </Text>
             </View>
-          </Card>
-        ))}
+          </>
+        )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -143,7 +169,7 @@ const styles = StyleSheet.create({
   },
   salaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
   salaryLabel: { fontSize: Typography.fontSize.xs, color: 'rgba(255,255,255,0.7)', marginBottom: 4 },
-  salaryAmount: { fontSize: Typography.fontSize['4xl'], fontWeight: '800', color: Colors.white },
+  salaryAmount: { fontSize: Typography.fontSize['3xl'], fontWeight: '800', color: Colors.white },
   salaryMeta: { flexDirection: 'row' },
   salaryMetaItem: { flex: 1, alignItems: 'center' },
   salaryMetaLabel: { fontSize: Typography.fontSize.xs, color: 'rgba(255,255,255,0.6)', marginBottom: 2 },
@@ -155,7 +181,7 @@ const styles = StyleSheet.create({
 
   breakdownHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   breakdownCol: { fontSize: Typography.fontSize.xs, fontWeight: '700', color: Colors.gray500, textTransform: 'uppercase', letterSpacing: 0.5 },
-  breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
+  breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 },
   breakdownLabel: { fontSize: Typography.fontSize.sm, color: Colors.gray700 },
   breakdownAmount: { fontSize: Typography.fontSize.sm, fontWeight: '700' },
   breakdownTotal: {
@@ -166,24 +192,28 @@ const styles = StyleSheet.create({
   breakdownTotalLabel: { fontSize: Typography.fontSize.base, fontWeight: '700', color: Colors.gray900 },
   breakdownTotalAmount: { fontSize: Typography.fontSize.base, fontWeight: '800', color: Colors.primary },
 
-  downloadBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: Colors.success, borderRadius: Radius.lg,
-    paddingVertical: 14, gap: 10, marginBottom: Spacing[4],
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 36,
+    paddingHorizontal: 24,
+    backgroundColor: Colors.gray50,
+    borderRadius: Radius.lg,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: Colors.gray100,
   },
-  downloadIcon: {},
-  downloadText: { fontSize: Typography.fontSize.sm, fontWeight: '700', color: Colors.white },
-
-  slipRow: { flexDirection: 'row', alignItems: 'center' },
-  slipIcon: {
-    width: IconBox.size, height: IconBox.size, borderRadius: IconBox.radius,
-    backgroundColor: IconBox.bg, alignItems: 'center', justifyContent: 'center', marginRight: 12,
-    ...IconBox.shadow as any,
+  emptyTitle: {
+    fontSize: Typography.fontSize.base,
+    fontWeight: '700',
+    color: Colors.gray700,
+    marginTop: 12,
+    marginBottom: 4,
   },
-  slipIconText: {},
-  slipInfo: { flex: 1 },
-  slipMonth: { fontSize: Typography.fontSize.base, fontWeight: '700', color: Colors.gray900 },
-  slipDate: { fontSize: Typography.fontSize.xs, color: Colors.gray500, marginTop: 2 },
-  slipRight: { alignItems: 'flex-end', gap: 4 },
-  slipNet: { fontSize: Typography.fontSize.base, fontWeight: '700', color: Colors.gray900 },
+  emptySub: {
+    fontSize: Typography.fontSize.xs,
+    color: Colors.gray500,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
 });

@@ -7,7 +7,6 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../design-system/tokens';
-import { mockChats, currentUser } from '../../data/mockData';
 import {
   fetchConversations,
   fetchMessages,
@@ -212,7 +211,7 @@ function MessageBubble({ item, prevMine, onLongPress }: MessageBubbleProps) {
   );
 }
 
-const normalizeMessage = (item: any, currentUserId: string = currentUser.employeeId): Message => {
+const normalizeMessage = (item: any, currentUserId: string = ''): Message => {
   const mine = item.sender && typeof item.sender === 'object'
     ? (item.sender._id === currentUserId || item.sender.id === currentUserId)
     : (item.sender === currentUserId || item.mine);
@@ -251,7 +250,7 @@ const normalizeMessage = (item: any, currentUserId: string = currentUser.employe
 export default function ChatDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const chat = mockChats.find(c => c.id === id) || { id, name: 'Active Conversation', isGroup: false };
+  const chat = { id, name: 'Active Conversation', isGroup: false };
 
   // Messages states
   const [messages, setMessages] = useState<Message[]>([]);
@@ -259,7 +258,7 @@ export default function ChatDetailScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
-  const [myUserId, setMyUserId] = useState<string>(currentUser.employeeId);
+  const [myUserId, setMyUserId] = useState<string>('');
   const [userRole, setUserRole] = useState<'employee' | 'superadmin' | 'hr' | 'manager' | 'admin'>('employee');
 
   // Options menus states
@@ -287,7 +286,7 @@ export default function ChatDetailScreen() {
   const loadMessages = async (showIndicator = true) => {
     if (showIndicator) setLoading(true);
     try {
-      let selfId = currentUser.employeeId;
+      let selfId = '';
       try {
         const prof = await fetchProfile();
         if (prof && prof.user) {

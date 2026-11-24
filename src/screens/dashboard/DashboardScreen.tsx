@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { checkInApi, checkOutApi, fetchTodayStatus, fetchIpLocation, CheckLocationPayload } from '../../services/attendanceService';
 import Svg, { Circle } from 'react-native-svg';
-import { fetchProfile } from '../../services/authService';
+import { fetchProfile, getCachedUser } from '../../services/authService';
 import { fetchTasks, pauseAllTimersApi } from '../../services/taskService';
 import { fetchAnnouncements } from '../../services/announcementService';
 import { fetchRecentNotificationsApi, markNotificationReadApi, markAllNotificationsReadApi } from '../../services/notificationService';
@@ -17,24 +17,28 @@ import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../desi
 import { Avatar } from '../../design-system/components/Avatar';
 import { Badge, statusToVariant } from '../../design-system/components/Badge';
 import { ProgressBar } from '../../design-system/components/Card';
-// import { mockAttendance } from '../../data/mockData';
+import { useAuth } from '../../context/AuthContext';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_W = (SCREEN_W - 16 * 2 - 10) / 2;
 
 const WEEK_DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
-const QUICK_ACTIONS = [
-  { icon: 'person-add-outline' as const, label: 'Leads', color: '#34D399', route: '/leads/add' },
-  { icon: 'megaphone-outline' as const, label: 'Announcements', color: '#FF4D6D', route: '/announcements' },
-  { icon: 'person-outline' as const, label: 'Profile', color: '#2E86B5', route: '/profile' },
+const ALL_QUICK_ACTIONS = [
+  { icon: 'checkmark-circle-outline' as const, label: 'Tasks', color: '#3B82F6', route: '/(tabs)/tasks', module: 'tasks' },
+  { icon: 'person-add-outline' as const, label: 'Leads', color: '#34D399', route: '/(tabs)/leads', module: 'leads' },
+  { icon: 'wallet-outline' as const, label: 'Expenses', color: '#8B5CF6', route: '/(tabs)/expenses', module: 'expenses' },
+  { icon: 'people-outline' as const, label: 'Employees', color: '#F59E0B', route: '/employees', module: 'employees' },
+  { icon: 'briefcase-outline' as const, label: 'Projects', color: '#0EA5E9', route: '/projects', module: 'projects' },
+  { icon: 'cash-outline' as const, label: 'Payroll', color: '#10B981', route: '/payroll', module: 'payroll' },
+  { icon: 'chatbubbles-outline' as const, label: 'Chat', color: '#6366F1', route: '/(tabs)/chat', module: 'chat' },
 ];
 
-const STATS = (pendingTasks: number, activeProjects: number, leaveBalance: number, attendance: string) => [
-  { label: 'Active Tasks', value: pendingTasks, icon: 'list-outline' as const, color: '#428DFF', bgColor: '#E9F2FF', route: '/(tabs)/tasks' },
-  { label: 'Pending Tasks', value: activeProjects, icon: 'timer-outline' as const, color: '#FFA05D', bgColor: '#FFF0E5', route: '/(tabs)/tasks' },
-  { label: 'Leave Balance', value: leaveBalance, icon: 'calendar-outline' as const, color: '#10C185', bgColor: '#E5F8F2', route: '/(tabs)/leaves' },
-  { label: 'Attendance', value: attendance, icon: 'checkmark-circle-outline' as const, color: '#FF2056', bgColor: '#FFE9EE', route: '/(tabs)/attendance' },
+const ALL_STATS = (pendingTasks: number, activeProjects: number, leaveBalance: number, attendance: string) => [
+  { label: 'Active Tasks', value: pendingTasks, icon: 'list-outline' as const, color: '#428DFF', bgColor: '#E9F2FF', route: '/(tabs)/tasks', module: 'tasks' },
+  { label: 'Pending Tasks', value: activeProjects, icon: 'timer-outline' as const, color: '#FFA05D', bgColor: '#FFF0E5', route: '/(tabs)/tasks', module: 'tasks' },
+  { label: 'Leave Balance', value: leaveBalance, icon: 'calendar-outline' as const, color: '#10C185', bgColor: '#E5F8F2', route: '/(tabs)/leaves', module: 'leaves' },
+  { label: 'Attendance', value: attendance, icon: 'checkmark-circle-outline' as const, color: '#FF2056', bgColor: '#FFE9EE', route: '/(tabs)/attendance', module: 'attendance' },
 ];
 
 function useElapsedTimer(checkedIn: boolean, inTimeStr?: string | null, outTimeStr?: string | null) {
@@ -105,10 +109,10 @@ const isNotificationRead = (n: any, currentUserId?: string) => {
     if (isReadArray) return false;
     return !!n.read || !!n.isRead;
   }
-  
+
   // Sometimes APIs return a direct boolean if they pre-computed it
   if (n.isRead === true || n.read === true) return true;
-  
+
   if (Array.isArray(readList) && readList.length > 0) {
     return readList.some((u: any) => {
       let targetId = u;
@@ -228,13 +232,24 @@ async function detectLocationWithFallback(): Promise<{ location: string; latitud
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const { canViewModule, user, refreshProfile: refreshAuthProfile } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [checkedIn, setCheckedIn] = useState(false);
   const [checkInTime, setCheckInTime] = useState('--:--');
   const [checkOutTime, setCheckOutTime] = useState('--:--');
   const [actionLoading, setActionLoading] = useState(false);
 
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(user || null);
+
+  React.useEffect(() => {
+    if (user) {
+      setProfile(user);
+    } else {
+      getCachedUser().then(cached => {
+        if (cached) setProfile(cached);
+      }).catch(() => { });
+    }
+  }, [user]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -322,7 +337,7 @@ export default function DashboardScreen() {
 
     try {
       const nData = await fetchRecentNotificationsApi();
-      
+
       if (nData && typeof nData.unreadCount === 'number') {
         setApiUnreadCount(nData.unreadCount);
       } else {
@@ -420,7 +435,7 @@ export default function DashboardScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadDashboardData();
+    await Promise.all([loadDashboardData(), refreshAuthProfile()]);
     setRefreshing(false);
   };
 
@@ -431,7 +446,12 @@ export default function DashboardScreen() {
   const leaveBalance = profile?.leaveBalance?.remaining
     ? (profile.leaveBalance.remaining.annual || 0) + (profile.leaveBalance.remaining.sick || 0) + (profile.leaveBalance.remaining.casual || 0)
     : 8;
-  const stats = STATS(activeTasksCount, pendingTasksCount, leaveBalance, '96%');
+  const stats = ALL_STATS(activeTasksCount, pendingTasksCount, leaveBalance, '96%').filter(
+    (item) => !item.module || canViewModule(item.module)
+  );
+  const quickActions = ALL_QUICK_ACTIONS.filter(
+    (item) => !item.module || canViewModule(item.module)
+  );
 
   const handleMarkAllRead = async () => {
     try {
@@ -450,10 +470,10 @@ export default function DashboardScreen() {
   const handleToggleRead = async (id: string) => {
     try {
       await markNotificationReadApi(id);
-      
+
       const notif = notifications.find(n => (n.id || n._id) === id);
       if (notif && !isNotificationRead(notif, currentUserId)) {
-         setApiUnreadCount(prev => (prev !== null && prev > 0) ? prev - 1 : prev);
+        setApiUnreadCount(prev => (prev !== null && prev > 0) ? prev - 1 : prev);
       }
 
       setNotifications(prev => prev.map(n => {
@@ -469,10 +489,14 @@ export default function DashboardScreen() {
     }
   };
 
-  const name = profile?.name || 'Venil Mottana';
-  const firstName = name.split(' ')[0];
-  const initials = name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
-  const designation = profile?.employmentDetails?.designation?.name || profile?.designation || 'Senior Software Engineer';
+  const name = profile?.name || profile?.employeePersonal?.fullName || '';
+  const firstName = name ? name.split(' ')[0] : '...';
+  const initials = name
+    ? name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
+    : 'HR';
+  const designation = profile?.employmentDetails?.designation?.name
+    || profile?.designation
+    || (profile?.role ? profile.role.toUpperCase() : '...');
 
   return (
     <View style={s.root}>
@@ -569,25 +593,30 @@ export default function DashboardScreen() {
             </View>
           </View>
 
-          <View style={s.quickActionsGrid}>
-            {QUICK_ACTIONS.map((a, i) => (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.quickActionsScroll}
+            style={s.quickActionsScrollContainer}
+          >
+            {quickActions.map((a, i) => (
               <TouchableOpacity
                 key={i}
                 style={s.quickActionItem}
                 onPress={() => router.push(a.route as any)}
-                activeOpacity={0.8}
+                activeOpacity={0.7}
               >
-                <View style={[s.quickActionIcon, { backgroundColor: `${a.color}15` }]}>
-                  <Ionicons name={a.icon} size={22} color={a.color} />
+                <View style={[s.quickActionIcon, { backgroundColor: `${a.color}15`, borderColor: `${a.color}30` }]}>
+                  <Ionicons name={a.icon} size={20} color={a.color} />
                 </View>
-                <Text style={s.quickActionText}>{a.label}</Text>
+                <Text style={s.quickActionText} numberOfLines={1}>{a.label}</Text>
               </TouchableOpacity>
             ))}
-          </View>
+          </ScrollView>
         </View>
 
         {/* ── CARD 2: UPGRADED ATTENDANCE CARD WITH RADIAL TIMER & BUTTON ── */}
-        {profile?.role !== 'admin' && profile?.role !== 'superadmin' && (
+        {canViewModule('attendance') && profile?.role !== 'admin' && profile?.role !== 'superadmin' && (
           <View style={s.attendanceCard}>
             {/* <View style={s.cardTitleRow}>
               <View style={s.cardTitleLeft}>
@@ -777,76 +806,78 @@ export default function DashboardScreen() {
         </View>
 
         {/* ── CARD 4: RECENT ANNOUNCEMENTS CARD ── */}
-        <View style={s.announcementsCard}>
-          <View style={s.cardTitleRow}>
-            <View style={s.cardTitleLeft}>
-              <View style={[s.cardIconCircle, { backgroundColor: '#FEE2E2' }]}>
-                <Ionicons name="megaphone" size={18} color="#EF4444" />
+        {canViewModule('announcements') && (
+          <View style={s.announcementsCard}>
+            <View style={s.cardTitleRow}>
+              <View style={s.cardTitleLeft}>
+                <View style={[s.cardIconCircle, { backgroundColor: '#FEE2E2' }]}>
+                  <Ionicons name="megaphone" size={18} color="#EF4444" />
+                </View>
+                <View>
+                  <Text style={s.cardTitle}>Announcements</Text>
+                  <Text style={s.cardSubtitle}>Latest updates from teams</Text>
+                </View>
               </View>
-              <View>
-                <Text style={s.cardTitle}>Announcements</Text>
-                <Text style={s.cardSubtitle}>Latest updates from teams</Text>
-              </View>
+              <TouchableOpacity onPress={() => router.push('/announcements')} style={s.cardHeaderAction} activeOpacity={0.7}>
+                <Ionicons name="chevron-forward-outline" size={20} color={Colors.gray500} />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity onPress={() => router.push('/announcements')} style={s.cardHeaderAction} activeOpacity={0.7}>
-              <Ionicons name="chevron-forward-outline" size={20} color={Colors.gray500} />
-            </TouchableOpacity>
-          </View>
 
-          <View style={s.annList}>
-            {announcements.slice(0, 3).map((item: any) => {
-              const priority = item.priority || 'Medium';
-              const priorityColor = priority === 'Urgent' ? '#EF4444' : priority === 'High' ? '#3B82F6' : priority === 'Medium' ? '#F59E0B' : '#10B981';
-              const priorityBg = priority === 'Urgent' ? '#FFE4EA' : priority === 'High' ? '#DBEAFE' : priority === 'Medium' ? '#FEF3C7' : '#D1FAE5';
-              const category = item.category || 'General';
-              const contentText = item.description ? item.description.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'") : 'Announcement details...';
-              const formattedDate = item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '';
-              return (
-                <TouchableOpacity
-                  key={item._id || item.id}
-                  style={item.pinned ? [s.annItem, { backgroundColor: '#FFFDF5' }] : s.annItem}
-                  onPress={() => router.push('/announcements')}
-                  activeOpacity={0.8}
-                >
-                  {/* Left colored bar based on priority */}
-                  <View style={[s.annPriorityBar, { backgroundColor: priorityColor }]} />
+            <View style={s.annList}>
+              {announcements.slice(0, 3).map((item: any) => {
+                const priority = item.priority || 'Medium';
+                const priorityColor = priority === 'Urgent' ? '#EF4444' : priority === 'High' ? '#3B82F6' : priority === 'Medium' ? '#F59E0B' : '#10B981';
+                const priorityBg = priority === 'Urgent' ? '#FFE4EA' : priority === 'High' ? '#DBEAFE' : priority === 'Medium' ? '#FEF3C7' : '#D1FAE5';
+                const category = item.category || 'General';
+                const contentText = item.description ? item.description.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'") : 'Announcement details...';
+                const formattedDate = item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '';
+                return (
+                  <TouchableOpacity
+                    key={item._id || item.id}
+                    style={item.pinned ? [s.annItem, { backgroundColor: '#FFFDF5' }] : s.annItem}
+                    onPress={() => router.push('/announcements')}
+                    activeOpacity={0.8}
+                  >
+                    {/* Left colored bar based on priority */}
+                    <View style={[s.annPriorityBar, { backgroundColor: priorityColor }]} />
 
-                  <View style={s.annIconCircle}>
-                    <Ionicons
-                      name={item.category === 'Holiday' ? 'calendar-outline' : item.category === 'Policy' ? 'document-text-outline' : 'megaphone-outline'}
-                      size={14}
-                      color={priorityColor}
-                    />
-                  </View>
-                  <View style={s.annContent}>
-                    <View style={s.annMetaRow}>
-                      <View style={[s.annPriorityBadge, { backgroundColor: priorityBg }]}>
-                        <Text style={[s.annPriorityText, { color: priorityColor }]}>{item.priority}</Text>
-                      </View>
-                      <Text style={s.annCategoryText}>{item.category}</Text>
-                      {item.pinned && (
-                        <Ionicons name="pin" size={10} color="#F59E0B" style={{ marginLeft: 'auto' }} />
-                      )}
+                    <View style={s.annIconCircle}>
+                      <Ionicons
+                        name={item.category === 'Holiday' ? 'calendar-outline' : item.category === 'Policy' ? 'document-text-outline' : 'megaphone-outline'}
+                        size={14}
+                        color={priorityColor}
+                      />
                     </View>
-                    <Text style={s.annTitleText} numberOfLines={1}>{item.title}</Text>
-                    <Text style={s.annDescText} numberOfLines={2}>{contentText}</Text>
-                    <View style={s.annFooterRow}>
-                      <View style={s.annAuthorSection}>
-                        <Ionicons name="person-outline" size={10} color={Colors.gray400} />
-                        <Text style={s.annAuthorText}>Admin</Text>
+                    <View style={s.annContent}>
+                      <View style={s.annMetaRow}>
+                        <View style={[s.annPriorityBadge, { backgroundColor: priorityBg }]}>
+                          <Text style={[s.annPriorityText, { color: priorityColor }]}>{item.priority}</Text>
+                        </View>
+                        <Text style={s.annCategoryText}>{item.category}</Text>
+                        {item.pinned && (
+                          <Ionicons name="pin" size={10} color="#F59E0B" style={{ marginLeft: 'auto' }} />
+                        )}
                       </View>
-                      <View style={s.annFooterDivider} />
-                      <View style={s.annDateSection}>
-                        <Ionicons name="calendar-outline" size={10} color={Colors.gray400} />
-                        <Text style={s.annDateText}>{formattedDate}</Text>
+                      <Text style={s.annTitleText} numberOfLines={1}>{item.title}</Text>
+                      <Text style={s.annDescText} numberOfLines={2}>{contentText}</Text>
+                      <View style={s.annFooterRow}>
+                        <View style={s.annAuthorSection}>
+                          <Ionicons name="person-outline" size={10} color={Colors.gray400} />
+                          <Text style={s.annAuthorText}>Admin</Text>
+                        </View>
+                        <View style={s.annFooterDivider} />
+                        <View style={s.annDateSection}>
+                          <Ionicons name="calendar-outline" size={10} color={Colors.gray400} />
+                          <Text style={s.annDateText}>{formattedDate}</Text>
+                        </View>
                       </View>
                     </View>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
-        </View>
+        )}
 
         <View style={{ height: 110 }} />
       </ScrollView>
@@ -1436,33 +1467,43 @@ const s = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 20,
     padding: 14,
+    paddingBottom: 14,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
     ...Shadow.sm,
   },
 
-  quickActionsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  quickActionsScrollContainer: {
+    marginHorizontal: -14,
     marginTop: 2,
   },
 
-  quickActionItem: {
-    flex: 1,
+  quickActionsScroll: {
+    paddingHorizontal: 14,
+    gap: 8,
     alignItems: 'center',
+    paddingVertical: 2,
+  },
+
+  quickActionItem: {
+    alignItems: 'center',
+    width: 58,
   },
 
   quickActionIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 13,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 6,
+    marginBottom: 4,
   },
 
   quickActionText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#45556C',
+    color: '#334155',
     textAlign: 'center',
   },
 });

@@ -7,7 +7,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { IconBox, Colors, Radius, Spacing, Shadow } from '../../design-system/tokens';
 import { useRouter } from 'expo-router';
-import { mockAnnouncements } from '../../data/mockData';
 import {
   fetchAnnouncements,
   createAnnouncement,

@@ -12,11 +12,25 @@ export interface DailyAttendanceRecord {
   _id: string;
   name: string;
   employeeId: string;
-  designation: string;
-  department: string;
-  checkIn: string;
-  checkOut: string;
-  status: 'present' | 'Absent' | 'late' | 'weekend' | 'holiday' | 'weeklyOff';
+  designation?: string;
+  department?: string;
+  checkIn?: string;
+  checkOut?: string;
+  inTime?: string;
+  outTime?: string;
+  workingHours?: string;
+  overtimeMinutes?: number;
+  status: 'present' | 'absent' | 'Absent' | 'late' | 'weekend' | 'holiday' | 'weeklyOff' | 'half_day' | string;
+}
+
+export interface DailyAttendanceResponse {
+  success: boolean;
+  date: string;
+  totalEmployees: number;
+  present: number;
+  absent: number;
+  onLeave: number;
+  report: DailyAttendanceRecord[];
 }
 
 export interface MonthlyAttendanceRecord {
@@ -34,15 +48,29 @@ export interface MonthlyAttendanceRecord {
   inTime: string;
   outTime: string;
   workingMinutes: number;
-  status: 'present' | 'Absent' | 'late' | 'weekend' | 'holiday' | 'weeklyOff';
+  status: 'present' | 'absent' | 'Absent' | 'late' | 'weekend' | 'holiday' | 'weeklyOff' | 'half_day' | string;
 }
 
 export interface EmployeeAttendanceDetail {
   date: string;
-  inTime?: string;
-  outTime?: string;
+  day?: string;
+  inTime?: string | null;
+  outTime?: string | null;
   workingMinutes?: number;
-  status: 'present' | 'Absent' | 'late' | 'weekend' | 'holiday' | 'weeklyOff';
+  overtimeMinutes?: number;
+  overtimeStatus?: 'pending' | 'approved' | 'rejected' | string;
+  status: 'present' | 'absent' | 'Absent' | 'late' | 'weekend' | 'holiday' | 'weeklyOff' | 'half_day' | string;
+}
+
+export interface EmployeeAttendanceResponse {
+  success: boolean;
+  employee: {
+    _id: string;
+    name: string;
+    employeeId: string;
+  } | null;
+  records: EmployeeAttendanceDetail[];
+  attendance: EmployeeAttendanceDetail[]; // Backward compatibility alias
 }
 
 export interface MarkAttendancePayload {
@@ -50,10 +78,11 @@ export interface MarkAttendancePayload {
   date: string; // YYYY-MM-DD
   inTime: string; // HH:MM
   outTime: string; // HH:MM
-  status: 'present' | 'Absent' | 'late';
+  status: 'present' | 'absent' | 'half_day' | 'weeklyOff' | string;
+  remarks?: string;
 }
 
-export const fetchDailyAttendance = async (date: string): Promise<DailyAttendanceRecord[]> => {
+export const fetchDailyAttendance = async (date: string): Promise<DailyAttendanceResponse & DailyAttendanceRecord[]> => {
   ensureBaseUrl();
   const token = await getToken();
   const tenantId = await getTenantId();
@@ -66,6 +95,38 @@ export const fetchDailyAttendance = async (date: string): Promise<DailyAttendanc
   });
   if (!res.ok) {
     throw new Error('Failed to fetch daily attendance report');
+  }
+  const data = await res.json();
+  if (Array.isArray(data)) {
+    return Object.assign(data, {
+      success: true,
+      date,
+      totalEmployees: data.length,
+      present: data.filter((r) => r.status === 'present').length,
+      absent: data.filter((r) => r.status === 'absent' || r.status === 'Absent').length,
+      onLeave: data.filter((r) => r.status === 'onLeave').length,
+      report: data,
+    });
+  }
+  return data;
+};
+
+export const fetchAttendanceMatrix = async (
+  month: number,
+  year: number,
+): Promise<{ success: boolean; data: any }> => {
+  ensureBaseUrl();
+  const token = await getToken();
+  const tenantId = await getTenantId();
+  const res = await fetch(`${BASE_URL}/attendance/matrix?month=${month}&year=${year}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-Tenant-Id': tenantId,
+    },
+  });
+  if (!res.ok) {
+    throw new Error('Failed to fetch attendance matrix');
   }
   return res.json();
 };
@@ -99,7 +160,7 @@ export const fetchEmployeeAttendance = async (
   month: number,
   year: number,
   fullMonth = true,
-): Promise<{ employee: any; attendance: EmployeeAttendanceDetail[] }> => {
+): Promise<EmployeeAttendanceResponse> => {
   ensureBaseUrl();
   const token = await getToken();
   const tenantId = await getTenantId();
@@ -117,10 +178,20 @@ export const fetchEmployeeAttendance = async (
     throw new Error('Failed to fetch employee monthly attendance');
   }
   const data = await res.json();
-  if (Array.isArray(data)) {
-    return { employee: null, attendance: data };
-  }
-  return data;
+  const records = Array.isArray(data)
+    ? data
+    : Array.isArray(data.records)
+    ? data.records
+    : Array.isArray(data.attendance)
+    ? data.attendance
+    : [];
+
+  return {
+    success: data.success ?? true,
+    employee: data.employee ?? null,
+    records,
+    attendance: records,
+  };
 };
 
 export const markAttendanceManually = async (
@@ -141,6 +212,73 @@ export const markAttendanceManually = async (
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.message || 'Failed to mark attendance manually');
+  }
+  return data;
+};
+
+export const updateAttendanceRecord = async (
+  id: string,
+  payload: { inTime?: string; outTime?: string; status?: string; remarks?: string },
+): Promise<{ success: boolean; message: string; data?: any }> => {
+  ensureBaseUrl();
+  const token = await getToken();
+  const tenantId = await getTenantId();
+  const res = await fetch(`${BASE_URL}/attendance/${id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-Tenant-Id': tenantId,
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to update attendance record');
+  }
+  return data;
+};
+
+export const deleteAttendanceRecord = async (
+  id: string,
+): Promise<{ success: boolean; message: string }> => {
+  ensureBaseUrl();
+  const token = await getToken();
+  const tenantId = await getTenantId();
+  const res = await fetch(`${BASE_URL}/attendance/${id}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-Tenant-Id': tenantId,
+    },
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to delete attendance record');
+  }
+  return data;
+};
+
+export const updateOvertimeStatus = async (
+  id: string,
+  status: 'approved' | 'rejected',
+): Promise<{ success: boolean; message: string }> => {
+  ensureBaseUrl();
+  const token = await getToken();
+  const tenantId = await getTenantId();
+  const res = await fetch(`${BASE_URL}/attendance/overtime/${id}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-Tenant-Id': tenantId,
+    },
+    body: JSON.stringify({ status }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to update overtime status');
   }
   return data;
 };

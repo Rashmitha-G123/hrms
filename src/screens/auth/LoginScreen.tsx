@@ -1,8 +1,8 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   KeyboardAvoidingView, Platform, StatusBar, Image,
-  ActivityIndicator, Modal,
+  ActivityIndicator, Modal, TextInput,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,8 +10,9 @@ import { SvgXml } from 'react-native-svg';
 import { Colors, Typography, Spacing, Radius } from '../../design-system/tokens';
 import { Button } from '../../design-system/components/Button';
 import { Input } from '../../design-system/components/Input';
+import { useAuth } from '../../context/AuthContext';
 import {
-  fetchCaptcha, loginApi, saveToken, saveTenantId,
+  fetchCaptcha, loginApi, saveToken, saveTenantId, saveCachedUser,
   CaptchaResponse, LoginError, LoginSuccess,
   registerSuperadminApi,
 } from '../../services/authService';
@@ -20,6 +21,8 @@ type LoginMode = 'employee' | 'superadmin';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { setUser } = useAuth();
+  const scrollViewRef = useRef<ScrollView>(null);
 
   const [mode, setMode] = useState<LoginMode>('employee');
   const [identifier, setIdentifier] = useState('');   // employeeId or email
@@ -79,11 +82,11 @@ export default function LoginScreen() {
   const handleRegisterSuperadmin = async () => {
     setRegisterError('');
     setRegisterSuccess('');
-    
+
     if (!registerName.trim()) { setRegisterError('Name is required.'); return; }
     if (!registerEmail.trim()) { setRegisterError('Email is required.'); return; }
     if (!registerPassword.trim()) { setRegisterError('Password is required.'); return; }
-    
+
     setRegisterLoading(true);
     try {
       const { ok, data } = await registerSuperadminApi({
@@ -91,7 +94,7 @@ export default function LoginScreen() {
         email: registerEmail.trim(),
         password: registerPassword,
       });
-      
+
       if (ok) {
         setRegisterSuccess(data.message || 'Superadmin registered successfully.');
         setRegisterName('');
@@ -134,14 +137,23 @@ export default function LoginScreen() {
         password,
         captcha: captchaInput.trim(),
         captchaToken,
+        identifier: id,
         ...(isEmail ? { email: id } : { employeeId: id }),
       };
 
       const { ok, status, data } = await loginApi(payload);
 
       if (ok && (data as LoginSuccess).success) {
-        const success = data as LoginSuccess;
+        const success = data as any;
         await saveToken(success.token);
+        const userObj = success.user ? {
+          ...success.user,
+          permissions: success.permissions || success.user?.permissions || [],
+        } : null;
+        if (userObj) {
+          await saveCachedUser(userObj);
+          setUser(userObj);
+        }
         if (success.user?.company?.tenantId) {
           await saveTenantId(success.user.company.tenantId);
         } else {
@@ -220,6 +232,7 @@ export default function LoginScreen() {
       </View>
 
       <ScrollView
+        ref={scrollViewRef}
         style={styles.form}
         contentContainerStyle={styles.formContent}
         showsVerticalScrollIndicator={false}
@@ -242,15 +255,16 @@ export default function LoginScreen() {
 
         {/* ── Identifier ── */}
         <Input
-          label={mode === 'superadmin' ? 'Email' : 'Employee ID'}
+          label={mode === 'superadmin' ? 'Email' : 'Employee ID or Email'}
           value={identifier}
           onChangeText={setIdentifier}
-          placeholder={mode === 'superadmin' ? 'admin@metromindz.com' : 'EMP001'}
-          keyboardType={mode === 'superadmin' ? 'email-address' : 'default'}
-          autoCapitalize={mode === 'superadmin' ? 'none' : 'characters'}
+          placeholder={mode === 'superadmin' ? 'admin@metromindz.com' : 'e.g. EMP-001 or you@company.com'}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
           leftIcon={
             <Ionicons
-              name={mode === 'superadmin' ? 'mail-outline' : 'id-card-outline'}
+              name={mode === 'superadmin' ? 'mail-outline' : 'person-outline'}
               size={18}
               color={'#A4A4AD'}
             />
@@ -279,13 +293,13 @@ export default function LoginScreen() {
         {/* ── CAPTCHA ── */}
         {!isDummySuperAdmin && (
           <View style={styles.captchaSection}>
-            <Text style={styles.captchaLabel}>{'CAPTCHA Verification'}</Text>
-            <View style={styles.captchaRow}>
+            <Text style={styles.captchaLabel}>{'Security Verification'}</Text>
+            <View style={styles.captchaInlineRow}>
               <View style={styles.captchaImageBox}>
                 {captchaLoading ? (
-                  <ActivityIndicator color={Colors.primary} />
+                  <ActivityIndicator color={Colors.primary} size="small" />
                 ) : captcha ? (
-                  <SvgXml xml={captcha} width="100%" height={56} />
+                  <SvgXml xml={captcha} width="100%" height={38} />
                 ) : (
                   <Text style={styles.captchaPlaceholder}>{'—'}</Text>
                 )}
@@ -294,19 +308,28 @@ export default function LoginScreen() {
                 style={styles.refreshBtn}
                 onPress={loadCaptcha}
                 disabled={captchaLoading}
+                accessibilityLabel="Refresh security code"
               >
-                <View><Ionicons name="refresh" size={20} color={Colors.primary} /></View>
+                <Ionicons name="refresh" size={18} color={Colors.primary} />
               </TouchableOpacity>
+              <View style={styles.captchaInputBox}>
+                <Ionicons name="shield-outline" size={16} color={'#A4A4AD'} style={{ marginLeft: 10, marginRight: 6 }} />
+                <TextInput
+                  value={captchaInput}
+                  onChangeText={setCaptchaInput}
+                  placeholder="Code"
+                  placeholderTextColor="#A4A4AD"
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  onFocus={() => {
+                    setTimeout(() => {
+                      scrollViewRef.current?.scrollToEnd({ animated: true });
+                    }, 120);
+                  }}
+                  style={styles.captchaTextInput}
+                />
+              </View>
             </View>
-            <Input
-              label=""
-              value={captchaInput}
-              onChangeText={setCaptchaInput}
-              placeholder="Enter CAPTCHA"
-              autoCapitalize="characters"
-              leftIcon={<Ionicons name="shield-outline" size={18} color={'#A4A4AD'} />}
-              style={styles.captchaInput}
-            />
           </View>
         )}
 
@@ -472,7 +495,7 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: Colors.primary,
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 8 : 56,
-    paddingBottom: 36, paddingHorizontal: Spacing[5], overflow: 'hidden',
+    paddingBottom: 20, paddingHorizontal: Spacing[5], overflow: 'hidden',
   },
   headerCircle: {
     position: 'absolute', width: 280, height: 280, borderRadius: 140,
@@ -496,7 +519,7 @@ const styles = StyleSheet.create({
 
   // Form
   form: { flex: 1 },
-  formContent: { paddingHorizontal: Spacing[5], paddingTop: Spacing[5], paddingBottom: 40 },
+  formContent: { paddingHorizontal: Spacing[5], paddingTop: Spacing[5], paddingBottom: 24 },
 
   // Toggle
   toggle: {
@@ -526,19 +549,53 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.sm, fontWeight: '600',
     color: Colors.gray700, marginBottom: 8, letterSpacing: 0.1,
   },
-  captchaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  captchaInlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   captchaImageBox: {
-    flex: 1, height: 60, backgroundColor: '#F9FAFB',
-    borderRadius: Radius.md, borderWidth: 1.5, borderColor: '#E4E4E7',
-    alignItems: 'center', justifyContent: 'center', overflow: 'hidden', paddingHorizontal: 8,
+    width: 110,
+    height: 48,
+    backgroundColor: '#F9FAFB',
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    borderColor: '#E4E4E7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    paddingHorizontal: 4,
   },
   captchaPlaceholder: { color: '#A4A4AD', fontSize: Typography.fontSize.sm },
   refreshBtn: {
-    width: 44, height: 44, borderRadius: Radius.md,
-    backgroundColor: Colors.overlayLight, borderWidth: 1.5, borderColor: '#E4E4E7',
-    alignItems: 'center', justifyContent: 'center',
+    width: 44,
+    height: 48,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.overlayLight,
+    borderWidth: 1.5,
+    borderColor: '#E4E4E7',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  captchaInput: { marginBottom: 0 },
+  captchaInputBox: {
+    flex: 1,
+    height: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.white,
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    borderColor: '#E4E4E7',
+  },
+  captchaTextInput: {
+    flex: 1,
+    height: '100%',
+    fontSize: Typography.fontSize.sm,
+    color: Colors.gray900,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    paddingRight: 8,
+  },
 
   // Banners
   warningBanner: {

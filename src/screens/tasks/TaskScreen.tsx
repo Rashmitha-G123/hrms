@@ -9,7 +9,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../design-system/tokens';
 import { ProgressBar } from '../../design-system/components/Card';
 import { Badge, statusToVariant } from '../../design-system/components/Badge';
-import { mockTasks, mockEmployees } from '../../data/mockData';
 import {
   fetchTasks,
   createTask,
@@ -29,6 +28,7 @@ import {
 } from '../../services/taskService';
 import { fetchProfile } from '../../services/authService';
 import { fetchEmployeesSelectionApi } from '../../services/employeeService';
+import { useAuth } from '../../context/AuthContext';
 import { fetchProjectsApi, Project } from '../../services/projectService';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -742,8 +742,14 @@ export default function TaskScreen() {
   const [loading, setLoading] = useState(true);
 
   // Role & Admin Task Stats State
+  const { hasPermission } = useAuth();
   const [userRole, setUserRole] = useState<'employee' | 'superadmin' | 'hr' | 'manager' | 'admin'>('employee');
   const [adminStats, setAdminStats] = useState<any>(null);
+
+  // Permission Checks based on Web Matrix
+  const canCreateTask = userRole === 'admin' || userRole === 'superadmin' || hasPermission('task.create');
+  const canEditTask = userRole === 'admin' || userRole === 'superadmin' || hasPermission('task.edit');
+  const canDeleteTask = userRole === 'admin' || userRole === 'superadmin' || hasPermission('task.delete');
 
   // Modal Views
   const [viewTask, setViewTask] = useState<Task | null>(null);
@@ -1158,7 +1164,7 @@ export default function TaskScreen() {
 
             {/* Action Buttons Row */}
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              {userRole !== 'superadmin' && (
+              {canCreateTask && (
                 <TouchableOpacity style={[s.addBtn, { flex: 1 }]} onPress={() => setShowAddModal(true)} activeOpacity={0.85}>
                   <Ionicons name="add" size={16} color={Colors.white} />
                   <Text style={s.addBtnText}>Add Task</Text>
@@ -1271,7 +1277,7 @@ export default function TaskScreen() {
 
               <Text style={st.fieldLabel}>Assignees (Team Members)</Text>
               <View style={st.pickerContainer}>
-                {(selectionEmployees.length > 0 ? selectionEmployees : mockEmployees).map(emp => {
+                {selectionEmployees.map(emp => {
                   const empId = emp._id || emp.id || '';
                   const selected = selectedAssignees.includes(empId);
                   return (

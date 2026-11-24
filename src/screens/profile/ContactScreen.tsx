@@ -10,7 +10,6 @@ import { Button } from '../../design-system/components/Button';
 import { Input } from '../../design-system/components/Input';
 import { ScreenHeader } from '../../design-system/components/Header';
 import { fetchProfile, updateProfileApi } from '../../services/authService';
-import { currentUser } from '../../data/mockData';
 
 export default function ContactScreen() {
   const router = useRouter();
@@ -94,7 +93,7 @@ export default function ContactScreen() {
   }
 
   const personal = profile?.employeePersonal || {};
-  const emailAddress = personal.emailAddress || profile?.email || currentUser.email;
+  const emailAddress = personal.emailAddress || profile?.email || 'N/A';
   const permanentAddress = personal.permanentAddress || 'N/A';
 
   return (

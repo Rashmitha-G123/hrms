@@ -8,7 +8,6 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../design-system/tokens';
 import { Badge } from '../../design-system/components/Badge';
-import { mockLeaves, mockEmployees } from '../../data/mockData';
 import {
   applyLeaveApi,
   approveOrRejectLeave,
@@ -22,6 +21,7 @@ import {
 } from '../../services/leaveService';
 import { fetchEmployees, fetchEmployeeById } from '../../services/employeeService';
 import { fetchProfile } from '../../services/authService';
+import { useAuth } from '../../context/AuthContext';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 type Tab = 'requests' | 'holidays';
@@ -33,13 +33,6 @@ const LEAVE_IDS: Record<string, string> = {
   'Sick Leave': '60d0fe4f5311236168a109cd',
   'Casual Leave': '60d0fe4f5311236168a109ce',
 };
-
-// Enhanced mock data for manager view
-const initialLeaves = mockLeaves.map((leave, i) => ({
-  ...leave,
-  employee: mockEmployees[i % mockEmployees.length],
-  manager: mockEmployees[0],
-}));
 
 const getLeaveIcon = (type: string): IoniconName => {
   if (type.includes('Sick')) return 'medical-outline';
@@ -126,10 +119,12 @@ export default function LeavesManagementScreen() {
   const [holidaysLoading, setHolidaysLoading] = useState(false);
   const [employees, setEmployees] = useState<any[]>([]);
   const [adminRemarks, setAdminRemarks] = useState('Approved by Admin');
+  const { hasPermission } = useAuth();
   const [profile, setProfile] = useState<any>(null);
   const [userRole, setUserRole] = useState<string>('employee');
   const isSuperAdmin = userRole === 'superadmin';
-  const canApproveReject = userRole === 'superadmin' || userRole === 'admin' || userRole === 'hr' || userRole === 'manager';
+  const canApproveReject = isSuperAdmin || userRole === 'admin' || userRole === 'hr' || hasPermission('leave.status');
+  const canCreateLeave = isSuperAdmin || userRole === 'admin' || hasPermission('leave.create');
 
   useEffect(() => {
     fetchProfile().then(p => {
@@ -321,11 +316,11 @@ export default function LeavesManagementScreen() {
       loadHolidaysData();
     }
   }, [activeTab, loadHolidaysData]);
-  const derivedEmployees = employees.length > 0 ? employees.map(e => ({
-    id: e.employeeId || e._id || e.id || '',
-    employeeId: e.employeeId || e._id || e.id || '',
+  const derivedEmployees = employees.map(e => ({
+    id: e.employeeId || e._id || (e as any).id || '',
+    employeeId: e.employeeId || e._id || (e as any).id || '',
     name: e.name || 'Unnamed Employee'
-  })) : mockEmployees.map(m => ({ id: m.id, employeeId: m.id, name: m.name }));
+  }));
 
   const filtered = leavesList.filter(l => {
     const matchStatus = statusFilter === 'all' || l.status === statusFilter;
@@ -567,7 +562,7 @@ export default function LeavesManagementScreen() {
                 />
               </View>
               <View style={[s.toolbarRow, isMobile && s.toolbarRowFull]}>
-                {!isSuperAdmin && (
+                {!isSuperAdmin && canCreateLeave && (
                   <TouchableOpacity
                     style={[s.toolBtn, { backgroundColor: Colors.accent }]}
                     onPress={() => setShowDirectModal(true)}

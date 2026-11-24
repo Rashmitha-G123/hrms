@@ -13,6 +13,14 @@ export interface Project {
   name: string;
   description?: string;
   status?: string;
+  client?: string;
+  progress?: number;
+  tasksTotal?: number;
+  tasksCompleted?: number;
+  priority?: string;
+  endDate?: string;
+  team?: any[];
+  [key: string]: any;
 }
 
 export const fetchProjectsApi = async (
@@ -32,5 +40,16 @@ export const fetchProjectsApi = async (
   if (!res.ok) {
     throw new Error('Failed to fetch projects list');
   }
-  return res.json();
+  const json = await res.json();
+  let items: Project[] = [];
+  if (Array.isArray(json)) {
+    items = json;
+  } else if (Array.isArray(json.items)) {
+    items = json.items;
+  } else if (Array.isArray(json.projects)) {
+    items = json.projects;
+  } else if (Array.isArray(json.data)) {
+    items = json.data;
+  }
+  return { success: true, items, total: json.total || items.length };
 };

@@ -10,7 +10,6 @@ import { Button } from '../../design-system/components/Button';
 import { Input } from '../../design-system/components/Input';
 import { ScreenHeader } from '../../design-system/components/Header';
 import { fetchProfile, updateProfileApi } from '../../services/authService';
-import { currentUser } from '../../data/mockData';
 
 const MARITAL_STATUS_OPTIONS = ['Single', 'Married', 'Divorced', 'Widowed'];
 

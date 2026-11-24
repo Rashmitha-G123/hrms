@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius } from '../../src/design-system/tokens';
+import { useAuth } from '../../src/context/AuthContext';
 
 interface TabIconProps {
   name: React.ComponentProps<typeof Ionicons>['name'];
@@ -24,6 +25,7 @@ const TabIcon: React.FC<TabIconProps> = ({ name, label, focused, color }) => (
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 12 : 0);
+  const { canViewModule } = useAuth();
 
   return (
     <Tabs
@@ -52,6 +54,7 @@ export default function TabsLayout() {
         name="attendance"
         options={{
           title: 'Attendance',
+          href: canViewModule('attendance') ? undefined : null,
           tabBarIcon: ({ focused, color }) => (
             <TabIcon name={focused ? 'time' : 'time-outline'} label="Attend" focused={focused} color={color} />
           ),
@@ -61,29 +64,70 @@ export default function TabsLayout() {
         name="leaves"
         options={{
           title: 'Leaves',
+          href: canViewModule('leaves') ? undefined : null,
           tabBarIcon: ({ focused, color }) => (
             <TabIcon name={focused ? 'calendar' : 'calendar-outline'} label="Leaves" focused={focused} color={color} />
           ),
         }}
       />
       <Tabs.Screen
+        name="announcements"
+        options={{
+          title: 'Announcements',
+          href: canViewModule('announcements') ? undefined : null,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name={focused ? 'megaphone' : 'megaphone-outline'} label="Notice" focused={focused} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name={focused ? 'person' : 'person-outline'} label="Profile" focused={focused} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="more"
+        options={{
+          title: 'More',
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name={focused ? 'grid' : 'grid-outline'} label="More" focused={focused} color={color} />
+          ),
+        }}
+      />
+
+      {/* Hidden from footer — accessible via Quick Actions */}
+      <Tabs.Screen
         name="tasks"
         options={{
-          title: 'Tasks',
-          tabBarIcon: ({ focused, color }) => (
-            <TabIcon name={focused ? 'checkmark-circle' : 'checkmark-circle-outline'} label="Tasks" focused={focused} color={color} />
-          ),
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="expenses"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="leads"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="leads-form"
+        options={{
+          href: null,
         }}
       />
       <Tabs.Screen
         name="chat"
         options={{
-          title: 'Chat',
-          tabBarIcon: ({ focused, color }) => (
-            <TabIcon name={focused ? 'chatbubbles' : 'chatbubbles-outline'} label="Chat" focused={focused} color={color} />
-          ),
-          tabBarBadge: 7,
-          tabBarBadgeStyle: { backgroundColor: Colors.danger, fontSize: 10, minWidth: 18, height: 18, borderRadius: 9 },
+          href: null,
         }}
       />
     </Tabs>
@@ -104,19 +148,19 @@ const styles = StyleSheet.create({
   },
   tabItem: {
     alignItems: 'center', justifyContent: 'center',
-    minWidth: 52, minHeight: 44, gap: 2,
+    minWidth: 38, minHeight: 44, gap: 2,
   },
   tabItemFocused: {},
   iconBg: {
-    paddingHorizontal: 14,
-    paddingVertical: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     marginBottom: 2,
   },
   activeIconBg: {
     backgroundColor: Colors.primary,
     borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     marginBottom: 2,
   },
   tabLabel: { fontSize: 10, letterSpacing: 0.1 },

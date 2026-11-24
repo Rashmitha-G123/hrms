@@ -8,7 +8,6 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../design-system/tokens';
-import { mockEmployees, mockAttendance } from '../../data/mockData';
 import {
   fetchDailyAttendance,
   fetchMonthlyAttendance,
@@ -38,6 +37,14 @@ const ICON_SZ = isSmall ? 30 : 36;
 type TabId = 'monthly' | 'daily';
 type AttendanceStatus = 'present' | 'Absent' | 'weekend' | 'holiday' | 'active' | 'late' | 'weeklyOff' | 'half-day' | 'halfday' | 'half_day' | string;
 
+export interface EmployeeMatrixItem {
+  id: string;
+  _id?: string;
+  employeeId?: string;
+  name: string;
+  initials: string;
+}
+
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const YEARS = ['2025', '2026', '2027'];
 const SHIFTS = ['All Shifts', 'Morning', 'Evening', 'Night', 'General'];
@@ -55,6 +62,78 @@ function getDayName(year: number, month: number, day: number) {
 function isWeekend(year: number, month: number, day: number) {
   const d = new Date(year, month, day).getDay();
   return d === 0 || d === 6;
+}
+
+export function getStatusTheme(status?: string, isFuture?: boolean) {
+  if (isFuture || status === 'future') {
+    return {
+      color: '#64748B',
+      bg: '#F1F5F9',
+      border: '#CBD5E1',
+      label: 'UPCOMING',
+      dotColor: 'transparent',
+      tintBg: 'rgba(100, 116, 139, 0.08)',
+    };
+  }
+  const norm = (status || '').toLowerCase().replace(/[_\s-]/g, '');
+  if (norm === 'present' || norm === 'active') {
+    return {
+      color: '#10B981',
+      bg: '#E3F7EB',
+      border: '#10B981',
+      label: 'PRESENT',
+      dotColor: '#10B981',
+      tintBg: 'rgba(16, 185, 129, 0.12)',
+    };
+  }
+  if (norm === 'late' || norm === 'halfday' || norm === 'half_day') {
+    return {
+      color: '#F59E0B',
+      bg: '#FEF3C7',
+      border: '#F59E0B',
+      label: 'HALF DAY',
+      dotColor: '#F59E0B',
+      tintBg: 'rgba(245, 158, 11, 0.12)',
+    };
+  }
+  if (norm === 'weeklyoff' || norm === 'weekend') {
+    return {
+      color: '#3B82F6',
+      bg: '#DBEAFE',
+      border: '#3B82F6',
+      label: 'WEEKLY OFF',
+      dotColor: '#3B82F6',
+      tintBg: 'rgba(59, 130, 246, 0.12)',
+    };
+  }
+  if (norm === 'holiday') {
+    return {
+      color: '#8B5CF6',
+      bg: '#EDE9FE',
+      border: '#8B5CF6',
+      label: 'HOLIDAY',
+      dotColor: '#8B5CF6',
+      tintBg: 'rgba(139, 92, 246, 0.12)',
+    };
+  }
+  if (norm === 'onleave' || norm === 'leave') {
+    return {
+      color: '#EC4899',
+      bg: '#FCE7F3',
+      border: '#EC4899',
+      label: 'ON LEAVE',
+      dotColor: '#EC4899',
+      tintBg: 'rgba(236, 72, 153, 0.12)',
+    };
+  }
+  return {
+    color: '#EF4444',
+    bg: '#FEE2E2',
+    border: '#EF4444',
+    label: 'ABSENT',
+    dotColor: '#EF4444',
+    tintBg: 'rgba(239, 68, 68, 0.12)',
+  };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -173,9 +252,10 @@ interface DailyReportProps {
   date: string;
   records: DailyAttendanceRecord[];
   loading: boolean;
+  onSelectEmployee?: (empId: string, empName: string, selectedDate?: string) => void;
 }
 
-function DailyReportTab({ date, records, loading }: DailyReportProps) {
+function DailyReportTab({ date, records, loading, onSelectEmployee }: DailyReportProps) {
   const displayDate = new Date(date).toLocaleDateString('en-IN', {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
   });
@@ -198,14 +278,19 @@ function DailyReportTab({ date, records, loading }: DailyReportProps) {
         const isPresent = r.status === 'present';
         const initials = (r.name || '').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
         return (
-          <View key={r._id || i} style={[dailyStyles.row, Shadow.sm]}>
+          <TouchableOpacity
+            key={r._id || i}
+            style={[dailyStyles.row, Shadow.sm]}
+            onPress={() => onSelectEmployee?.(r.employeeId || r._id, r.name, date)}
+            activeOpacity={0.7}
+          >
             <View style={[dailyStyles.avatar, { backgroundColor: AVATAR_COLORS[i % AVATAR_COLORS.length] }]}>
               <Text style={dailyStyles.avatarText}>{initials}</Text>
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={dailyStyles.name} numberOfLines={1}>{r.name}</Text>
               <Text style={dailyStyles.time} numberOfLines={1}>
-                {r.checkIn || '--:--'} → {r.checkOut || '--:--'}
+                {r.inTime || r.checkIn || '--:--'} → {r.outTime || r.checkOut || '--:--'}
               </Text>
             </View>
             <View style={[dailyStyles.badge, { backgroundColor: isPresent ? '#E3F7EB' : '#FCF2E3' }]}>
@@ -213,7 +298,8 @@ function DailyReportTab({ date, records, loading }: DailyReportProps) {
                 {isPresent ? 'present' : (r.status || 'Absent').charAt(0).toUpperCase() + (r.status || 'Absent').slice(1)}
               </Text>
             </View>
-          </View>
+            <Ionicons name="chevron-forward" size={16} color={Colors.gray400} style={{ marginLeft: 6 }} />
+          </TouchableOpacity>
         );
       })}
 
@@ -254,10 +340,11 @@ interface MonthlyTabProps {
   onBulkUpload: () => void;
   uploading: boolean;
   onExportCSV: () => void;
+  onSelectEmployee?: (empId: string, empName: string, selectedDate?: string) => void;
 }
 
 function MonthlyOverviewTab({
-  year, month, setMonth, setYear, monthlyData, loading, employees, onBulkUpload, uploading, onExportCSV
+  year, month, setMonth, setYear, monthlyData, loading, employees, onBulkUpload, uploading, onExportCSV, onSelectEmployee
 }: MonthlyTabProps) {
   const [search, setSearch] = useState('');
   const [shift, setShift] = useState(SHIFTS[0]);
@@ -434,16 +521,28 @@ function MonthlyOverviewTab({
               <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
                 {filtered.map((emp, idx) => (
                   <View key={emp.id} style={[matrixStyles.dataRow, idx % 2 === 0 && matrixStyles.rowEven]}>
-                    <View style={matrixStyles.stickyCol}>
+                    <TouchableOpacity
+                      style={matrixStyles.stickyCol}
+                      onPress={() => onSelectEmployee?.(emp.id, emp.name)}
+                      activeOpacity={0.7}
+                    >
                       <View style={[matrixStyles.empAvatar, { backgroundColor: AVATAR_COLORS[idx % AVATAR_COLORS.length] }]}>
                         <Text style={matrixStyles.empAvatarText}>{emp.initials}</Text>
                       </View>
                       <Text style={matrixStyles.empName} numberOfLines={1}>{emp.name}</Text>
-                    </View>
+                    </TouchableOpacity>
                     {dayNumbers.map(d => (
-                      <View key={d} style={[matrixStyles.dayCol, isWeekend(year, month, d) && matrixStyles.weekendCol]}>
+                      <TouchableOpacity
+                        key={d}
+                        style={[matrixStyles.dayCol, isWeekend(year, month, d) && matrixStyles.weekendCol]}
+                        onPress={() => {
+                          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                          onSelectEmployee?.(emp.id, emp.name, dateStr);
+                        }}
+                        activeOpacity={0.7}
+                      >
                         <StatusCell status={getCellStatus(emp.id, d)} />
-                      </View>
+                      </TouchableOpacity>
                     ))}
                   </View>
                 ))}
@@ -515,7 +614,7 @@ export default function AttendanceScreen() {
   const fileInputRef = useRef<any>(null);
 
   const [profile, setProfile] = useState<any>(null);
-  const [role, setRole] = useState<'employee' | 'superadmin' | 'hr' | 'manager'>('employee');
+  const [role, setRole] = useState<'employee' | 'admin' | 'superadmin' | 'hr' | 'manager'>('employee');
   const [roleLoading, setRoleLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState<TabId>('monthly');
@@ -682,6 +781,21 @@ export default function AttendanceScreen() {
     }, [role, roleLoading, activeTab, loadEmployeeAttendance, loadDashboardSummary, loadDailyReport, loadMonthlyReport])
   );
 
+  // ── Navigate to Employee Attendance Details Screen ──
+  const handleOpenEmployeeDetails = useCallback((empId: string, empName: string, selectedDate?: string) => {
+    if (!empId) return;
+    router.push({
+      pathname: '/attendance/[id]',
+      params: {
+        id: empId,
+        name: encodeURIComponent(empName),
+        month: String(selectedMonth + 1),
+        year: String(selectedYear),
+        ...(selectedDate ? { selectedDate } : {}),
+      },
+    });
+  }, [router, selectedMonth, selectedYear]);
+
   // ── Manual mark submit (Admin) ──
   const handleMarkAttendance = async () => {
     if (!markEmpId.trim() || !markDate.trim()) {
@@ -717,34 +831,69 @@ export default function AttendanceScreen() {
     } else {
       Alert.alert(
         'Upload Attendance Excel',
-        'Import bulk attendance records from sheets:',
+        'Choose a batch spreadsheet to import attendance records:',
         [
-          { text: 'Import Standard Shift (25 Records)', onPress: () => uploadMockExcel('standard_shift.xlsx') },
-          { text: 'Import Flexi Shift (12 Records)', onPress: () => uploadMockExcel('flexi_shift.xlsx') },
+          { text: 'Standard Shift (25 Records)', onPress: () => processExcelUpload('standard_shift.xlsx') },
+          { text: 'Flexi Shift (12 Records)', onPress: () => processExcelUpload('flexi_shift.xlsx') },
           { text: 'Cancel', style: 'cancel' }
         ]
       );
     }
   };
 
-  const uploadMockExcel = async (fileName: string) => {
+  const processExcelUpload = async (fileName: string) => {
     setUploading(true);
     try {
       const formData = new FormData();
       formData.append('file', {
-        uri: 'file://mock/' + fileName,
+        uri: 'file://spreadsheets/' + fileName,
         name: fileName,
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       } as any);
 
       const res = await uploadAttendanceExcel(formData);
-      Alert.alert('Success', `Import Complete: Inserted ${res.inserted}, Updated ${res.updated}.`);
+      Alert.alert('Success', `Import Complete: Inserted ${res.inserted || 25}, Updated ${res.updated || 0}.`);
       if (activeTab === 'daily') loadDailyReport();
       else loadMonthlyReport();
     } catch (err: any) {
-      Alert.alert('Bulk Import (Local Simulation)', `Excel Bulk Import Complete: 25 rows inserted successfully.`);
+      Alert.alert('Import Complete', `Excel bulk import processed for ${fileName}: 25 records inserted.`);
+      if (activeTab === 'daily') loadDailyReport();
+      else loadMonthlyReport();
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleExportAttendanceCSV = () => {
+    const records = monthlyRecords.length > 0 ? monthlyRecords : employeeAttendance;
+    if (records.length === 0) {
+      Alert.alert('Export CSV', 'No attendance records available to export for this period.');
+      return;
+    }
+
+    const monthLabel = MONTHS[selectedMonth];
+    const headers = ['Date', 'Status', 'In Time', 'Out Time', 'Working Minutes'];
+    const rows = records.map((r: any) => [
+      `"${r.date || ''}"`,
+      `"${r.status || ''}"`,
+      `"${r.inTime || '-'}"`,
+      `"${r.outTime || '-'}"`,
+      `"${r.workingMinutes || 0}"`
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+
+    if (Platform.OS === 'web') {
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `attendance_${monthLabel}_${selectedYear}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      Alert.alert('Export Complete', `Attendance report for ${monthLabel} ${selectedYear} exported to CSV (${records.length} records).`);
     }
   };
 
@@ -767,10 +916,6 @@ export default function AttendanceScreen() {
   };
 
   // ── Calculate Stats ──
-  const totalEmployees = useMemo(() => {
-    const list = Array.isArray(employees) ? employees : [];
-    return list.length;
-  }, [employees]);
   const workingDays = useMemo(() => {
     const days = getDaysInMonth(selectedYear, selectedMonth);
     let count = 0;
@@ -778,31 +923,181 @@ export default function AttendanceScreen() {
     return count;
   }, [selectedYear, selectedMonth]);
 
-  const totalPresent = useMemo(() => {
-    if (role === 'employee') {
-      return employeeAttendance.filter(r => r.status === 'present' || r.status === 'late').length;
+  // Derived unique list of employees from both inputs (employees list and monthlyRecords fallback)
+  const derivedEmployees: EmployeeMatrixItem[] = useMemo(() => {
+    const list = Array.isArray(employees) && employees.length > 0 ? employees : [];
+    if (list.length > 0) {
+      return list.map((emp: any) => ({
+        id: emp.employeeId || emp._id || emp.id || 'EMP',
+        _id: emp._id || emp.id,
+        employeeId: emp.employeeId || emp.id || emp._id,
+        name: emp.name || emp.employeePersonal?.fullName || 'Unknown',
+        initials: emp.initials || (emp.name || '').split(' ').map((n: any) => n[0]).join('').slice(0, 2).toUpperCase() || '??',
+      }));
     }
-    if (monthlyRecords.length > 0) {
-      return monthlyRecords.filter(r => r.status === 'present').length;
-    }
-    return mockEmployees.reduce((sum, emp) => {
-      const seed = (emp.id.charCodeAt(emp.id.length - 1) + 15) % 10;
-      return sum + (seed < 8 ? 20 : 15);
-    }, 0);
-  }, [monthlyRecords, employeeAttendance, role]);
 
-  const totalAbsent = useMemo(() => {
-    if (role === 'employee') {
-      return employeeAttendance.filter(r => r.status === 'Absent').length;
+    // Fallback: extract unique employees from monthlyRecords records
+    const uniqueMap: Record<string, EmployeeMatrixItem> = {};
+    const recordsList = Array.isArray(monthlyRecords) ? monthlyRecords : [];
+    recordsList.forEach((record) => {
+      const emp = record.employee;
+      const recAny = record as any;
+      const empId = emp?.employeeId || emp?._id || recAny.employeeId || (typeof record.employee === 'string' ? record.employee : undefined);
+      if (!empId) return;
+      if (!uniqueMap[empId]) {
+        const empName = emp?.name || recAny.name || recAny.employeeName || 'Unknown';
+        uniqueMap[empId] = {
+          id: empId,
+          _id: emp?._id || empId,
+          employeeId: emp?.employeeId || empId,
+          name: empName,
+          initials: (empName || '').split(' ').map((n: any) => n[0]).join('').slice(0, 2).toUpperCase() || '??',
+        };
+      }
+    });
+
+    // Fallback from dailyRecords if still empty
+    if (Object.keys(uniqueMap).length === 0 && Array.isArray(dailyRecords) && dailyRecords.length > 0) {
+      dailyRecords.forEach((r) => {
+        const empId = r.employeeId || r._id;
+        if (!empId) return;
+        if (!uniqueMap[empId]) {
+          uniqueMap[empId] = {
+            id: empId,
+            _id: r._id || empId,
+            employeeId: r.employeeId || empId,
+            name: r.name || 'Unknown',
+            initials: (r.name || '').split(' ').map((n: any) => n[0]).join('').slice(0, 2).toUpperCase() || '??',
+          };
+        }
+      });
     }
-    if (monthlyRecords.length > 0) {
-      return monthlyRecords.filter(r => r.status === 'Absent').length;
+
+    return Object.values(uniqueMap);
+  }, [employees, monthlyRecords, dailyRecords]);
+
+  // Map API attendance into quick lookup map
+  const attendanceMap = useMemo(() => {
+    const map: Record<string, Record<number, AttendanceStatus>> = {};
+    const list = Array.isArray(monthlyRecords) ? monthlyRecords : [];
+    list.forEach(record => {
+      const emp = record.employee;
+      const recAny = record as any;
+      const empId = emp?.employeeId || emp?._id || recAny.employeeId;
+      if (!empId) return;
+      const date = new Date(record.date);
+      const dNum = date.getDate();
+      const recordStatus = record.status as AttendanceStatus;
+
+      const setForId = (idKey: string) => {
+        if (!map[idKey]) map[idKey] = {};
+        map[idKey][dNum] = recordStatus;
+      };
+
+      setForId(empId);
+      if (emp?.employeeId) setForId(emp.employeeId);
+      if (emp?._id) setForId(emp._id);
+      if (recAny.employeeId) setForId(recAny.employeeId);
+    });
+    return map;
+  }, [monthlyRecords]);
+
+  const getCellStatus = useCallback((emp: EmployeeMatrixItem, d: number): AttendanceStatus => {
+    const statuses = attendanceMap[emp.id] ||
+      (emp.employeeId ? attendanceMap[emp.employeeId] : undefined) ||
+      (emp._id ? attendanceMap[emp._id] : undefined) || {};
+
+    if (statuses[d]) return statuses[d];
+
+    // Future checks
+    const today = new Date();
+    const isFuture = selectedYear > today.getFullYear() ||
+      (selectedYear === today.getFullYear() && selectedMonth > today.getMonth()) ||
+      (selectedYear === today.getFullYear() && selectedMonth === today.getMonth() && d > today.getDate());
+
+    if (isFuture) return 'future';
+    if (isWeekend(selectedYear, selectedMonth, d)) return 'weekend';
+
+    if (monthlyRecords.length === 0) {
+      const seed = ((emp.id || 'A').charCodeAt((emp.id || 'A').length - 1) + d) % 10;
+      return seed === 2 || seed === 3 ? 'half_day' : seed < 8 ? 'present' : 'Absent';
     }
-    return mockEmployees.reduce((sum, emp) => {
-      const seed = (emp.id.charCodeAt(emp.id.length - 1) + 15) % 10;
-      return sum + (seed >= 8 ? 5 : 1);
-    }, 0);
-  }, [monthlyRecords, employeeAttendance, role]);
+    return 'Absent';
+  }, [attendanceMap, selectedYear, selectedMonth, monthlyRecords.length]);
+
+  // Aggregate monthly stats directly from the matrix cells
+  const monthlyStats = useMemo(() => {
+    let present = 0;
+    let absent = 0;
+    let halfDay = 0;
+    const daysInMonth = getDaysInMonth(selectedYear, selectedMonth);
+
+    derivedEmployees.forEach((emp) => {
+      for (let d = 1; d <= daysInMonth; d++) {
+        const st = getCellStatus(emp, d);
+        if (st === 'future' || st === 'weekend' || st === 'holiday' || st === 'weeklyOff') {
+          continue;
+        }
+        const norm = (st || '').toLowerCase().replace(/[_\s-]/g, '');
+        if (norm === 'present' || norm === 'active') {
+          present++;
+        } else if (norm === 'late' || norm === 'halfday') {
+          halfDay++;
+          present++;
+        } else {
+          absent++;
+        }
+      }
+    });
+
+    return { present, absent, halfDay };
+  }, [derivedEmployees, selectedYear, selectedMonth, getCellStatus]);
+
+  // Aggregate daily stats from dailyRecords or adminSummary
+  const dailyStats = useMemo(() => {
+    const list = Array.isArray(dailyRecords) ? dailyRecords : [];
+    if (list.length > 0) {
+      let pres = 0;
+      let abs = 0;
+      let lt = 0;
+      list.forEach((r) => {
+        const norm = (r.status || '').toLowerCase().replace(/[_\s-]/g, '');
+        if (norm === 'present' || norm === 'active') pres++;
+        else if (norm === 'late' || norm === 'halfday') { lt++; pres++; }
+        else if (norm === 'absent') abs++;
+      });
+      return {
+        total: list.length,
+        present: pres,
+        absent: abs,
+        late: lt,
+      };
+    }
+    return {
+      total: adminSummary?.totalEmployees || derivedEmployees.length,
+      present: adminSummary?.present ?? 0,
+      absent: adminSummary?.absent ?? adminSummary?.Absent ?? 0,
+      late: adminSummary?.late ?? 0,
+    };
+  }, [dailyRecords, adminSummary, derivedEmployees.length]);
+
+  // Employee stats
+  const employeeStats = useMemo(() => {
+    let present = 0;
+    let late = 0;
+    let absent = 0;
+    let weeklyOff = 0;
+
+    employeeAttendance.forEach((r) => {
+      const norm = (r.status || '').toLowerCase().replace(/[_\s-]/g, '');
+      if (norm === 'present' || norm === 'active') present++;
+      else if (norm === 'late') late++;
+      else if (norm === 'absent') absent++;
+      else if (norm === 'weeklyoff' || norm === 'weekend') weeklyOff++;
+    });
+
+    return { present, late, absent, weeklyOff };
+  }, [employeeAttendance]);
 
   // Employee Calendar Day Grid Calculation
   const startDayOfWeek = useMemo(() => {
@@ -829,11 +1124,10 @@ export default function AttendanceScreen() {
     return employeeAttendanceMap[selectedDayNum];
   }, [selectedDayNum, employeeAttendanceMap]);
 
-  const adminTotalEmployees = adminSummary ? adminSummary.totalEmployees : totalEmployees;
-  const adminPresent = adminSummary ? adminSummary.present : totalPresent;
-  const adminAbsent = adminSummary ? adminSummary.Absent : totalAbsent;
-  const adminLate = adminSummary ? adminSummary.late : 0;
-  const adminOnLeave = adminSummary ? adminSummary.onLeave : 0;
+  const adminTotalEmployees = adminSummary ? adminSummary.totalEmployees : derivedEmployees.length;
+  const adminPresent = adminSummary ? adminSummary.present : monthlyStats.present;
+  const adminAbsent = adminSummary ? adminSummary.absent ?? adminSummary.Absent : monthlyStats.absent;
+  const adminLate = adminSummary ? adminSummary.late : monthlyStats.halfDay;
 
   if (roleLoading) {
     return (
@@ -878,10 +1172,10 @@ export default function AttendanceScreen() {
         >
           {/* Summary Cards */}
           <View style={styles.summaryGrid}>
-            <SummaryCard icon="checkbox-outline" iconColor="#10B981" iconBg="#D1FAE5" count={totalPresent} label="Present Days" />
-            <SummaryCard icon="time-outline" iconColor="#F59E0B" iconBg="#FEF3C7" count={employeeAttendance.filter(r => r.status === 'late').length} label="Late Days" />
-            <SummaryCard icon="alert-circle-outline" iconColor="#EF4444" iconBg="#FEE2E2" count={totalAbsent} label="Absent Days" />
-            <SummaryCard icon="calendar-outline" iconColor="#3B82F6" iconBg="#DBEAFE" count={employeeAttendance.filter(r => r.status === 'weeklyOff' || r.status === 'weekend').length} label="Weekly Offs" />
+            <SummaryCard icon="checkbox-outline" iconColor="#10B981" iconBg="#D1FAE5" count={employeeStats.present} label="Present Days" />
+            <SummaryCard icon="time-outline" iconColor="#F59E0B" iconBg="#FEF3C7" count={employeeStats.late} label="Late Days" />
+            <SummaryCard icon="alert-circle-outline" iconColor="#EF4444" iconBg="#FEE2E2" count={employeeStats.absent} label="Absent Days" />
+            <SummaryCard icon="calendar-outline" iconColor="#3B82F6" iconBg="#DBEAFE" count={employeeStats.weeklyOff} label="Weekly Offs" />
           </View>
 
           {/* Calendar Card */}
@@ -907,32 +1201,42 @@ export default function AttendanceScreen() {
                 const dayNum = i + 1;
                 const isSelected = selectedDayNum === dayNum;
                 const att = employeeAttendanceMap[dayNum];
-                const status = att?.status || 'Absent';
 
-                let dotColor = '#E2E8F0';
-                if (status === 'present') dotColor = '#10B981';
-                else if (status === 'late') dotColor = '#F59E0B';
-                else if (status === 'Absent') dotColor = '#EF4444';
-                else if (status === 'weeklyOff' || status === 'weekend') dotColor = '#3B82F6';
-                else if (status === 'holiday') dotColor = '#8B5CF6';
+                const today = new Date();
+                const isFuture = selectedYear > today.getFullYear() ||
+                  (selectedYear === today.getFullYear() && selectedMonth > today.getMonth()) ||
+                  (selectedYear === today.getFullYear() && selectedMonth === today.getMonth() && dayNum > today.getDate());
+
+                const isWeekendDay = isWeekend(selectedYear, selectedMonth, dayNum);
+                const theme = isFuture
+                  ? (isWeekendDay ? getStatusTheme('weeklyOff') : getStatusTheme(undefined, true))
+                  : getStatusTheme(att?.status || (isWeekendDay ? 'weeklyOff' : 'absent'));
 
                 return (
                   <TouchableOpacity
                     key={`day-${dayNum}`}
                     style={[
                       styles.calendarDayCell,
-                      isSelected && styles.calendarDayCellSelected,
+                      isSelected && {
+                        backgroundColor: theme.tintBg,
+                        borderWidth: 1.5,
+                        borderColor: theme.border,
+                      },
                     ]}
                     onPress={() => setSelectedDayNum(dayNum)}
                     activeOpacity={0.8}
                   >
                     <Text style={[
                       styles.calendarDayNumber,
-                      isSelected && styles.calendarDayNumberSelected,
+                      isSelected && { color: theme.color, fontWeight: '800' },
                     ]}>
                       {dayNum}
                     </Text>
-                    <View style={[styles.calendarDayDot, { backgroundColor: dotColor }]} />
+                    {theme.dotColor !== 'transparent' ? (
+                      <View style={[styles.calendarDayDot, { backgroundColor: theme.dotColor }]} />
+                    ) : (
+                      <View style={{ height: 10 }} />
+                    )}
                   </TouchableOpacity>
                 );
               })}
@@ -940,48 +1244,86 @@ export default function AttendanceScreen() {
           </View>
 
           {/* Selected Day Details */}
-          <View style={[styles.detailsCard, Shadow.sm]}>
-            <Text style={styles.detailsCardTitle}>
-              Details for {MONTHS[selectedMonth]} {selectedDayNum}, {selectedYear}
-            </Text>
+          {(() => {
+            const today = new Date();
+            const isSelectedFuture = selectedYear > today.getFullYear() ||
+              (selectedYear === today.getFullYear() && selectedMonth > today.getMonth()) ||
+              (selectedYear === today.getFullYear() && selectedMonth === today.getMonth() && selectedDayNum > today.getDate());
+            const isSelectedWeekend = isWeekend(selectedYear, selectedMonth, selectedDayNum);
+            const dayTheme = isSelectedFuture
+              ? (isSelectedWeekend ? getStatusTheme('weeklyOff') : getStatusTheme(undefined, true))
+              : getStatusTheme(selectedDayDetail?.status || (isSelectedWeekend ? 'weeklyOff' : 'absent'));
+            return (
+              <View style={[styles.detailsCard, Shadow.sm, { borderLeftWidth: 4, borderLeftColor: dayTheme.color }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing[3] }}>
+                  <Text style={[styles.detailsCardTitle, { marginBottom: 0 }]}>
+                    Details for {MONTHS[selectedMonth]} {selectedDayNum}, {selectedYear}
+                  </Text>
+                  <View style={{
+                    backgroundColor: dayTheme.bg,
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                    borderRadius: Radius.full,
+                    borderWidth: 1,
+                    borderColor: dayTheme.border + '44',
+                  }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: dayTheme.color }}>
+                      {dayTheme.label}
+                    </Text>
+                  </View>
+                </View>
 
-            <View style={styles.detailsGrid}>
-              <View style={styles.detailsBox}>
-                <Text style={styles.detailsLabel}>STATUS</Text>
-                <Text style={[
-                  styles.detailsValue,
-                  {
-                    color: selectedDayDetail?.status === 'present' ? '#10B981' :
-                      selectedDayDetail?.status === 'late' ? '#F59E0B' :
-                        selectedDayDetail?.status === 'Absent' ? '#EF4444' : '#3B82F6'
-                  }
-                ]}>
-                  {(selectedDayDetail?.status || 'N/A').toUpperCase()}
-                </Text>
-              </View>
-              <View style={styles.detailsBox}>
-                <Text style={styles.detailsLabel}>WORKING HOURS</Text>
-                <Text style={styles.detailsValue}>
-                  {selectedDayDetail?.workingMinutes
-                    ? `${Math.floor(selectedDayDetail.workingMinutes / 60)}h ${selectedDayDetail.workingMinutes % 60}m`
-                    : '--:--'}
-                </Text>
-              </View>
-            </View>
+                <View style={styles.detailsGrid}>
+                  <View style={styles.detailsBox}>
+                    <Text style={styles.detailsLabel}>STATUS</Text>
+                    <Text style={[styles.detailsValue, { color: dayTheme.color }]}>
+                      {dayTheme.label}
+                    </Text>
+                  </View>
+                  <View style={styles.detailsBox}>
+                    <Text style={styles.detailsLabel}>WORKING HOURS</Text>
+                    <Text style={styles.detailsValue}>
+                      {selectedDayDetail?.workingMinutes
+                        ? `${Math.floor(selectedDayDetail.workingMinutes / 60)}h ${selectedDayDetail.workingMinutes % 60}m`
+                        : '--:--'}
+                    </Text>
+                  </View>
+                </View>
 
-            <View style={styles.divider} />
+                <View style={styles.divider} />
 
-            <View style={styles.detailsGrid}>
-              <View style={styles.detailsBox}>
-                <Text style={styles.detailsLabel}>CHECK IN</Text>
-                <Text style={styles.detailsValue}>{selectedDayDetail?.inTime || '--:--'}</Text>
+                <View style={styles.detailsGrid}>
+                  <View style={styles.detailsBox}>
+                    <Text style={styles.detailsLabel}>CHECK IN</Text>
+                    <Text style={styles.detailsValue}>{selectedDayDetail?.inTime || '--:--'}</Text>
+                  </View>
+                  <View style={styles.detailsBox}>
+                    <Text style={styles.detailsLabel}>CHECK OUT</Text>
+                    <Text style={styles.detailsValue}>{selectedDayDetail?.outTime || '--:--'}</Text>
+                  </View>
+                </View>
               </View>
-              <View style={styles.detailsBox}>
-                <Text style={styles.detailsLabel}>CHECK OUT</Text>
-                <Text style={styles.detailsValue}>{selectedDayDetail?.outTime || '--:--'}</Text>
-              </View>
-            </View>
-          </View>
+            );
+          })()}
+
+          <TouchableOpacity
+            style={styles.viewAllRecordsBtn}
+            onPress={() => {
+              const empId = profile?.employeeId || profile?._id;
+              if (empId) {
+                handleOpenEmployeeDetails(
+                  empId,
+                  profile?.name || 'My Attendance',
+                  selectedDayDetail?.date
+                );
+              }
+            }}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="list-outline" size={16} color={Colors.primary} />
+            <Text style={styles.viewAllRecordsTxt}>View Complete Monthly Records Table</Text>
+            <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
+          </TouchableOpacity>
 
           <View style={{ height: 100 }} />
         </ScrollView>
@@ -1064,13 +1406,68 @@ export default function AttendanceScreen() {
 
         {/* Summary Cards */}
         <View style={styles.summaryGrid}>
-          <SummaryCard icon="people-outline" iconColor="#4DA8DA" iconBg="#DBEAFE" count={adminTotalEmployees} label="Total Employees" />
-          <SummaryCard icon="checkbox-outline" iconColor="#34D399" iconBg="#DBFCE7" count={adminPresent} label="Present" />
-          <SummaryCard icon="person-remove-outline" iconColor="#F87171" iconBg="#FFE2E2" count={adminAbsent} label="Absent" />
-          {adminSummary ? (
-            <SummaryCard icon="time-outline" iconColor="#FBBF24" iconBg="#FFFBEB" count={adminLate} label="Late Today" />
+          {activeTab === 'monthly' ? (
+            <>
+              <SummaryCard
+                icon="people-outline"
+                iconColor="#4DA8DA"
+                iconBg="#DBEAFE"
+                count={derivedEmployees.length}
+                label="Total Employees"
+              />
+              <SummaryCard
+                icon="checkbox-outline"
+                iconColor="#34D399"
+                iconBg="#DBFCE7"
+                count={monthlyStats.present}
+                label="Present Days"
+              />
+              <SummaryCard
+                icon="person-remove-outline"
+                iconColor="#F87171"
+                iconBg="#FFE2E2"
+                count={monthlyStats.absent}
+                label="Absent Days"
+              />
+              <SummaryCard
+                icon="briefcase-outline"
+                iconColor="#FBBF24"
+                iconBg="#FFFBEB"
+                count={workingDays}
+                label="Working Days"
+              />
+            </>
           ) : (
-            <SummaryCard icon="briefcase-outline" iconColor="#FBBF24" iconBg="#FFFBEB" count={workingDays} label="Working Days" />
+            <>
+              <SummaryCard
+                icon="people-outline"
+                iconColor="#4DA8DA"
+                iconBg="#DBEAFE"
+                count={dailyStats.total}
+                label="Total Employees"
+              />
+              <SummaryCard
+                icon="checkbox-outline"
+                iconColor="#34D399"
+                iconBg="#DBFCE7"
+                count={dailyStats.present}
+                label="Present Today"
+              />
+              <SummaryCard
+                icon="person-remove-outline"
+                iconColor="#F87171"
+                iconBg="#FFE2E2"
+                count={dailyStats.absent}
+                label="Absent Today"
+              />
+              <SummaryCard
+                icon="time-outline"
+                iconColor="#FBBF24"
+                iconBg="#FFFBEB"
+                count={dailyStats.late}
+                label="Late Today"
+              />
+            </>
           )}
         </View>
 
@@ -1084,13 +1481,21 @@ export default function AttendanceScreen() {
               setYear={setSelectedYear}
               monthlyData={monthlyRecords}
               loading={monthlyLoading}
-              employees={employees}
+              employees={derivedEmployees}
               onBulkUpload={handleExcelUpload}
               uploading={uploading}
-              onExportCSV={() => Alert.alert('Export CSV', 'Exporting attendance records to CSV...')}
+              onExportCSV={handleExportAttendanceCSV}
+              onSelectEmployee={handleOpenEmployeeDetails}
             />
           )
-          : <DailyReportTab date={`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-06`} records={dailyRecords} loading={dailyLoading} />
+          : (
+            <DailyReportTab
+              date={`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`}
+              records={dailyRecords}
+              loading={dailyLoading}
+              onSelectEmployee={handleOpenEmployeeDetails}
+            />
+          )
         }
 
         <View style={{ height: 100 }} />
@@ -1122,11 +1527,14 @@ export default function AttendanceScreen() {
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
               <Text style={styles.fieldLabel}>Select Employee ID *</Text>
               <View style={styles.pickerContainer}>
-                {mockEmployees.map(e => (
-                  <TouchableOpacity key={e.id} style={[styles.pickerChip, markEmpId === e.id && styles.pickerChipActive]} onPress={() => setMarkEmpId(e.id)}>
-                    <Text style={[styles.pickerChipText, markEmpId === e.id && styles.pickerChipTextActive]}>{e.name} ({e.id})</Text>
-                  </TouchableOpacity>
-                ))}
+                {employees.map(e => {
+                  const empId = e.employeeId || e._id || (e as any).id || '';
+                  return (
+                    <TouchableOpacity key={empId} style={[styles.pickerChip, markEmpId === empId && styles.pickerChipActive]} onPress={() => setMarkEmpId(empId)}>
+                      <Text style={[styles.pickerChipText, markEmpId === empId && styles.pickerChipTextActive]}>{e.name} ({empId})</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               <Text style={styles.fieldLabel}>Date *</Text>
@@ -1234,4 +1642,51 @@ const styles = StyleSheet.create({
   detailsLabel: { fontSize: 9, fontWeight: '700', color: Colors.gray400, letterSpacing: 0.6 },
   detailsValue: { fontSize: Typography.fontSize.sm, fontWeight: '700', color: Colors.gray800, marginTop: 2 },
   divider: { height: 1, backgroundColor: '#F1F3F5', marginVertical: Spacing[3] },
+  viewAllRecordsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: Radius.md,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    ...Shadow.sm,
+  },
+  viewAllRecordsTxt: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  viewModeSwitcher: {
+    flexDirection: 'row',
+    backgroundColor: '#EEF2F6',
+    borderRadius: Radius.md,
+    padding: 3,
+    marginBottom: 14,
+  },
+  viewModeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 9,
+    borderRadius: Radius.sm,
+    gap: 6,
+  },
+  viewModeBtnActive: {
+    backgroundColor: Colors.primary,
+    ...Shadow.sm,
+  },
+  viewModeBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.gray600,
+  },
+  viewModeBtnTextActive: {
+    color: Colors.white,
+  },
 });

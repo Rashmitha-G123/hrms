@@ -6,7 +6,6 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../design-system/tokens';
-import { mockNotifications } from '../../data/mockData';
 import {
   fetchRecentNotificationsApi,
   markNotificationReadApi,

@@ -51,7 +51,7 @@ export default function ProfileScreen() {
     } catch (err) {
       console.warn('Failed to logout via API:', err);
     }
-    router.replace('/auth/welcome');
+    router.replace('/auth/login');
   };
 
   if (loading) {

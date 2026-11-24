@@ -8,7 +8,6 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../design-system/tokens';
 import { Avatar } from '../../design-system/components/Avatar';
-import { mockEmployees } from '../../data/mockData';
 import {
   fetchEmployees,
   createEmployee,

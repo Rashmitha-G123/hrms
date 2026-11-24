@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius } from '../../design-system/tokens';
 import { Button } from '../../design-system/components/Button';
+import { getCachedUser } from '../../services/authService';
 
 const shadowLg = Platform.OS === 'web'
   ? { boxShadow: '0px 8px 24px rgba(46,134,181,0.18)' }
@@ -11,10 +12,17 @@ const shadowLg = Platform.OS === 'web'
 
 export default function BiometricAuthScreen() {
   const router = useRouter();
+  const [user, setUser] = useState<any>(null);
   const [scanning, setScanning] = useState(false);
   const [success, setSuccess]   = useState(false);
   const pulseAnim   = useRef(new Animated.Value(1)).current;
   const successAnim = useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    getCachedUser().then(u => {
+      if (u) setUser(u);
+    }).catch(() => {});
+  }, []);
 
   const pulse = () => {
     Animated.loop(
@@ -48,10 +56,12 @@ export default function BiometricAuthScreen() {
       <View style={styles.content}>
         <View style={styles.userCard}>
           <View style={[styles.avatar, shadowLg]}>
-            <Text style={styles.avatarText}>{'VM'}</Text>
+            <Text style={styles.avatarText}>
+              {user?.name ? user.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() : 'HR'}
+            </Text>
           </View>
-          <Text style={styles.userName}>{'Venil Mottana'}</Text>
-          <Text style={styles.userRole}>{'Senior Software Engineer'}</Text>
+          <Text style={styles.userName}>{user?.name || 'Employee'}</Text>
+          <Text style={styles.userRole}>{user?.employmentDetails?.designation?.name || user?.designation || user?.role || 'Staff Member'}</Text>
         </View>
 
         <TouchableOpacity onPress={handleScan} activeOpacity={0.85} disabled={scanning || success}>
@@ -72,7 +82,7 @@ export default function BiometricAuthScreen() {
           {success ? 'Authenticated!' : scanning ? 'Scanning...' : 'Touch to authenticate'}
         </Text>
         <Text style={styles.scanSub}>
-          {success ? 'Welcome back, Venil' : 'Use Face ID or Fingerprint to sign in'}
+          {success ? `Welcome back, ${user?.name ? user.name.split(' ')[0] : 'User'}` : 'Use Face ID or Fingerprint to sign in'}
         </Text>
 
         {!scanning && !success && (

@@ -10,7 +10,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow, IconBox } from '../../design-system/tokens';
 import { SectionHeader } from '../../design-system/components/Card';
 import { Badge, statusToVariant } from '../../design-system/components/Badge';
-// import { mockLeaves, currentUser } from '../../data/mockData';
 import { fetchMyLeaveHistoryApi } from '../../services/leaveService';
 import { fetchProfile } from '../../services/authService';
 

@@ -12,6 +12,44 @@ const ensureBaseUrl = () => {
 
 const TOKEN_KEY = 'hrms_jwt';
 const TENANT_KEY = 'hrms_tenant';
+const USER_KEY = 'hrms_cached_user';
+
+export const saveCachedUser = async (user: any) => {
+  try {
+    const str = JSON.stringify(user);
+    if (Platform.OS === 'web') {
+      localStorage.setItem(USER_KEY, str);
+    } else {
+      await SecureStore.setItemAsync(USER_KEY, str);
+    }
+  } catch (e) {
+    console.warn('Failed to cache user profile:', e);
+  }
+};
+
+export const getCachedUser = async () => {
+  try {
+    let str: string | null = null;
+    if (Platform.OS === 'web') {
+      str = localStorage.getItem(USER_KEY);
+    } else {
+      str = await SecureStore.getItemAsync(USER_KEY);
+    }
+    return str ? JSON.parse(str) : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+export const clearCachedUser = async () => {
+  try {
+    if (Platform.OS === 'web') {
+      localStorage.removeItem(USER_KEY);
+    } else {
+      await SecureStore.deleteItemAsync(USER_KEY);
+    }
+  } catch (e) { }
+};
 
 // ── Token storage (expo-secure-store: native = Keychain/Keystore, web = localStorage fallback) ──
 export const saveToken = async (token: string) => {
@@ -178,7 +216,14 @@ export const fetchProfile = async () => {
     },
   });
   if (!res.ok) throw new Error('Unauthorized');
-  return res.json();
+  const data = await res.json();
+  if (data && data.user) {
+    if (data.permissions && !data.user.permissions) {
+      data.user.permissions = data.permissions;
+    }
+    saveCachedUser(data.user);
+  }
+  return data;
 };
 
 export const updateProfileApi = async (
@@ -217,4 +262,5 @@ export const logoutApi = async () => {
   }).catch(() => { });
   await clearToken();
   await clearTenantId();
+  await clearCachedUser();
 };

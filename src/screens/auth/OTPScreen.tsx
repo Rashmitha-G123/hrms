@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform, StatusBar, Animated } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius } from '../../design-system/tokens';
 import { Button } from '../../design-system/components/Button';
@@ -9,6 +9,8 @@ const RESEND_SECONDS = 60;
 
 export default function OTPScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ email?: string }>();
+  const displayEmail = params.email || 'your registered work email';
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [timer, setTimer] = useState(RESEND_SECONDS);
   const [loading, setLoading] = useState(false);
@@ -57,7 +59,7 @@ export default function OTPScreen() {
         <Text style={styles.title}>{'OTP Verification'}</Text>
         <Text style={styles.sub}>
           {'Enter the 6-digit code sent to\n'}
-          <Text style={styles.email}>{'venil.mottana@metromindz.com'}</Text>
+          <Text style={styles.email}>{displayEmail}</Text>
         </Text>
       </View>
 

@@ -67,29 +67,11 @@ export default function ActivityLogsScreen() {
         }
       }
     } catch (err) {
-      console.warn('Failed to fetch activity logs from API, using mock fallback:', err);
-      // Fallback mock logs list
-      const mockLogs: ActivityLog[] = [
-        { id: '1', title: 'Logged in successfully from 192.168.1.1', action: 'login', createdAt: '2026-07-06T09:14:00.000Z' },
-        { id: '2', title: 'Checked in at 09:18 AM by Venil Mottana', action: 'check_in', createdAt: '2026-07-06T09:18:00.000Z' },
-        { id: '3', title: 'Logged in successfully from Web App', action: 'login', createdAt: '2026-07-06T10:05:00.000Z' },
-        { id: '4', title: 'Checked in at 09:30 AM by Sanjay Verma', action: 'check_in', createdAt: '2026-07-06T11:05:00.000Z' },
-        { id: '5', title: 'Checked in at 13:20 by John Doe', action: 'check_in', createdAt: '2026-07-06T13:20:00.000Z' },
-        { id: '6', title: 'Logged in successfully from Mobile App', action: 'login', createdAt: '2026-07-06T14:45:00.000Z' },
-        { id: '7', title: 'Changed settings: Biometric Login toggled on', action: 'update_settings', createdAt: '2026-07-06T15:10:00.000Z' },
-      ];
-
-      // Filter mock logs locally
-      const filtered = mockLogs.filter(l => {
-        const matchAction = !activeAction || l.action === activeAction;
-        const matchSearch = !search.trim() || l.title.toLowerCase().includes(search.toLowerCase());
-        return matchAction && matchSearch;
-      });
-
-      setLogs(filtered);
+      console.warn('Failed to fetch activity logs from API:', err);
+      setLogs([]);
       setPage(1);
       setTotalPages(1);
-      setTotalItems(filtered.length);
+      setTotalItems(0);
     } finally {
       setLoading(false);
     }

@@ -7,7 +7,6 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../design-system/tokens';
-import { mockChats, currentUser } from '../../data/mockData';
 import { fetchConversations } from '../../services/chatService';
 import { fetchProfile } from '../../services/authService';
 
@@ -115,7 +114,7 @@ function ChatRow({ item, onPress, index }: { item: ChatItem; onPress: () => void
   );
 }
 
-const normalizeConversation = (item: any, currentUserId: string = currentUser.employeeId): ChatItem => {
+const normalizeConversation = (item: any, currentUserId: string = ''): ChatItem => {
   const isGroup = !!item.isGroup;
 
   let name = item.name || '';
@@ -178,7 +177,7 @@ export default function ChatScreen() {
   const loadConversations = async (showIndicator = true) => {
     if (showIndicator) setLoading(true);
     try {
-      let selfId = currentUser.employeeId;
+      let selfId = '';
       try {
         const prof = await fetchProfile();
         if (prof && prof.user && prof.user._id) {

@@ -7,7 +7,6 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius } from '../../design-system/tokens';
 import { Avatar } from '../../design-system/components/Avatar';
-import { mockEmployees, mockChats } from '../../data/mockData';
 import { getOrCreateDirectChat } from '../../services/chatService';
 import { fetchEmployeesSelectionApi } from '../../services/employeeService';
 
@@ -36,15 +35,7 @@ export default function NewChatScreen() {
       setEmployees(mapped);
     } catch (err) {
       console.warn('Failed to fetch employee directory:', err);
-      // Fallback to mockEmployees
-      const mappedMocks = mockEmployees.map(emp => ({
-        id: emp.id,
-        name: emp.name,
-        employeeId: emp.id,
-        designation: emp.designation,
-        initials: emp.initials,
-      }));
-      setEmployees(mappedMocks);
+      setEmployees([]);
     } finally {
       setLoadingEmployees(false);
     }
@@ -71,13 +62,8 @@ export default function NewChatScreen() {
         router.back();
       }
     } catch (err: any) {
-      // Local fallback simulation lookup
-      const existing = mockChats.find(c => !c.isGroup && (c as any).initials === emp.initials);
-      if (existing) {
-        router.replace(`/chat/${existing.id}` as any);
-      } else {
-        router.back();
-      }
+      console.warn('Failed to open chat:', err);
+      router.back();
     } finally {
       setLoading(false);
     }
